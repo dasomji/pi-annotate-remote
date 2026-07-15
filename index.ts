@@ -8,6 +8,7 @@ import * as os from "node:os";
 import { fileURLToPath } from "node:url";
 import { AnnotationSessionClient, ensureBrokerRunning } from "./broker/client.js";
 import { getBrokerConfig } from "./broker/config.js";
+import { ensureTailscaleServe } from "./broker/tailscale.js";
 import type { AnnotationResult, ElementSelection, EditCapture } from "./types.js";
 
 const MAX_SCREENSHOT_BYTES = 15 * 1024 * 1024;
@@ -19,6 +20,44 @@ type AnnotationContext = {
     setStatus?: (source: string, message: string) => void;
   };
 };
+
+type TailscaleServeInfo = {
+  endpoint: string | null;
+  localEndpoint: string;
+  active: boolean;
+  warning?: string;
+};
+
+export function formatSetupInstructions({
+  sessionLabel,
+  token,
+  serve,
+}: {
+  sessionLabel: string;
+  token: string;
+  serve: TailscaleServeInfo;
+}): string {
+  const lines = [
+    `Annotation session available as ${sessionLabel}`,
+    "",
+    "Configure the browser extension with:",
+    `Endpoint: ${serve.endpoint || "unavailable"}`,
+    `Token: ${token}`,
+  ];
+
+  if (serve.active && serve.endpoint) {
+    lines.push("", `Tailscale Serve: active (${serve.endpoint} → ${serve.localEndpoint})`);
+  } else {
+    lines.push(
+      "",
+      `Local broker: ${serve.localEndpoint}`,
+      `Tailscale Serve warning: ${serve.warning || "automatic setup failed"}`,
+      "Run `/annotate setup` to retry automatic setup.",
+    );
+  }
+
+  return lines.join("\n");
+}
 
 function gitBranch(cwd: string): string {
   try {
@@ -55,27 +94,16 @@ export default function (pi: ExtensionAPI) {
   let brokerToken: string | null = null;
   let currentCtx: AnnotationContext | null = null;
   let setupShown = false;
+  let serveInfo: TailscaleServeInfo | null = null;
 
   function setStatus(message: string) {
     currentCtx?.ui?.setStatus?.("pi-annotate", message);
   }
 
-  function setupInstructions(token: string): string {
-    const localEndpoint = `http://${brokerConfig.host}:${brokerConfig.port}`;
-    return [
-      `Annotation session available as ${sessionLabel}`,
-      "",
-      "Configure the browser extension with:",
-      `Endpoint: your Tailscale Serve HTTPS URL`,
-      `Token: ${token}`,
-      "",
-      "If Tailscale Serve is not configured, run on this machine:",
-      `tailscale serve --bg --https=443 ${localEndpoint}`,
-      "Then use the HTTPS URL reported by `tailscale serve status` in the browser popup.",
-    ].join("\n");
-  }
-
-  async function enableAnnotationSession(ctx: AnnotationContext): Promise<string> {
+  async function enableAnnotationSession(
+    ctx: AnnotationContext,
+    { refreshServe = false } = {},
+  ): Promise<{ token: string; serve: TailscaleServeInfo }> {
     currentCtx = ctx;
     if (!annotationClient) {
       annotationClient = new AnnotationSessionClient({
@@ -99,7 +127,13 @@ export default function (pi: ExtensionAPI) {
     if (!brokerToken) {
       brokerToken = await ensureBrokerRunning({ config: brokerConfig, daemonPath });
     }
-    return brokerToken;
+    if (refreshServe || !serveInfo?.active) {
+      serveInfo = await ensureTailscaleServe({
+        host: brokerConfig.host,
+        port: brokerConfig.port,
+      });
+    }
+    return { token: brokerToken, serve: serveInfo };
   }
 
   async function annotateHandler(args: string, ctx: AnnotationContext) {
@@ -114,7 +148,8 @@ export default function (pi: ExtensionAPI) {
 
     if (action === "status") {
       const state = annotationClient?.registered ? "available" : "unavailable";
-      ctx.ui?.notify?.(`Annotation session is ${state}: ${sessionLabel}`, "info");
+      const endpoint = serveInfo?.endpoint ? `\nEndpoint: ${serveInfo.endpoint}` : "";
+      ctx.ui?.notify?.(`Annotation session is ${state}: ${sessionLabel}${endpoint}`, "info");
       return;
     }
 
@@ -124,13 +159,13 @@ export default function (pi: ExtensionAPI) {
     }
 
     try {
-      const token = await enableAnnotationSession(ctx);
-      if (action === "setup" || !setupShown) {
-        ctx.ui?.notify?.(setupInstructions(token), "info");
-        setupShown = true;
-      } else {
-        ctx.ui?.notify?.(`Annotation session available as ${sessionLabel}`, "info");
-      }
+      const enabled = await enableAnnotationSession(ctx, { refreshServe: action === "setup" });
+      ctx.ui?.notify?.(formatSetupInstructions({
+        sessionLabel,
+        token: enabled.token,
+        serve: enabled.serve,
+      }), "info");
+      setupShown = true;
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error);
       ctx.ui?.notify?.(`Could not start annotation broker: ${message}`, "error");
@@ -426,20 +461,29 @@ export default function (pi: ExtensionAPI) {
     async execute(_toolCallId, _params, _signal, _onUpdate, ctx) {
       currentCtx = ctx;
       try {
-        const token = await enableAnnotationSession(ctx);
+        const enabled = await enableAnnotationSession(ctx);
         if (!setupShown && ctx.hasUI) {
-          ctx.ui.notify(setupInstructions(token), "info");
+          ctx.ui.notify(formatSetupInstructions({
+            sessionLabel,
+            token: enabled.token,
+            serve: enabled.serve,
+          }), "info");
           setupShown = true;
         }
+        const endpointText = enabled.serve.endpoint
+          ? ` at ${enabled.serve.endpoint}`
+          : ` locally; Tailscale Serve setup needs attention (${enabled.serve.warning || "unknown error"})`;
         return {
           content: [{
             type: "text",
-            text: `Annotation session is available as ${sessionLabel}. Select it in the Pi Annotate browser popup and submit the annotation.`,
+            text: `Annotation session is available as ${sessionLabel}${endpointText}. Select it in the Pi Annotate browser popup and submit the annotation.`,
           }],
           details: {
             sessionId,
             label: sessionLabel,
-            localEndpoint: `http://${brokerConfig.host}:${brokerConfig.port}`,
+            endpoint: enabled.serve.endpoint,
+            localEndpoint: enabled.serve.localEndpoint,
+            tailscaleWarning: enabled.serve.warning,
           },
         };
       } catch (error) {

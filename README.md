@@ -51,27 +51,21 @@ In the project session you want to annotate, run:
 /annotate
 ```
 
-The first invocation starts a shared localhost broker and shows:
+Every invocation starts or reconnects the shared localhost broker, configures Tailscale Serve when needed, and prints:
 
-- the one-time Tailscale Serve command;
-- where to get the broker HTTPS endpoint;
-- the bearer token to paste into the browser popup.
+- the exact HTTPS endpoint to paste into the browser popup;
+- the bearer token;
+- the verified Serve route to the local broker.
 
-The default local broker is `http://127.0.0.1:32179`. On the headless host, the Serve command is normally:
+The default local broker is `http://127.0.0.1:32179`. Pi Annotate exposes it on the same tailnet HTTPS port, producing an endpoint such as:
 
-```bash
-tailscale serve --bg --https=443 http://127.0.0.1:32179
+```text
+https://your-machine.your-tailnet.ts.net:32179
 ```
 
-Use the HTTPS URL reported by:
-
-```bash
-tailscale serve status
-```
+Automatic setup is idempotent: an existing matching route is reused, and an unrelated Serve or Funnel route on port `32179` is never overwritten. If Tailscale is unavailable, disconnected, awaiting HTTPS enablement, or has a port conflict, `/annotate` keeps the local broker running and prints a bounded warning instead of a misleading remote URL. Fix the reported condition and run `/annotate setup` to retry.
 
 Tailscale Serve keeps the broker available only on your tailnet. Do **not** enable Tailscale Funnel for this service. See the [Tailscale Serve documentation](https://tailscale.com/docs/features/tailscale-serve) for machine and tailnet setup.
-
-Run `/annotate setup` whenever you need to see the command and token again.
 
 ### 3. Load the browser extension
 
@@ -85,8 +79,8 @@ Run `/annotate setup` whenever you need to see the command and token again.
 ### 4. Pair the browser and choose a session
 
 1. Open the Pi Annotate popup.
-2. Paste the HTTPS endpoint from `tailscale serve status`.
-3. Paste the token shown by `/annotate setup`.
+2. Paste the exact HTTPS endpoint printed by `/annotate`.
+3. Paste the token printed alongside it.
 4. Click **Save & connect** and approve access to that broker host.
 5. Select a live Pi session and click **Start annotation**.
 
@@ -96,9 +90,9 @@ The extension requests optional network access only for the configured host. `ht
 
 | Command | Effect |
 |---|---|
-| `/annotate` or `/annotate on` | Make the current Pi session available in the browser popup |
-| `/annotate status` | Report whether this session is currently registered |
-| `/annotate setup` | Enable this session and show the Serve command and token again |
+| `/annotate` or `/annotate on` | Make the session available, ensure Tailscale Serve, and print the exact endpoint and token |
+| `/annotate status` | Report whether this session is registered and show its known endpoint |
+| `/annotate setup` | Re-check Tailscale Serve and print the endpoint and token again |
 | `/annotate off` | Remove this session from the popup without stopping the shared broker |
 
 The `annotate` tool uses the same availability flow when Pi decides visual feedback is useful. Browser submissions arrive later as a user message in the selected Pi session; the tool does not hold an agent turn open while you annotate.
@@ -163,7 +157,7 @@ Example output:
 
 ## Security and storage
 
-- The broker listens on `127.0.0.1` by default; Tailscale Serve provides tailnet HTTPS.
+- The broker listens on `127.0.0.1` by default; Pi Annotate configures Tailscale Serve on the broker port to provide tailnet HTTPS.
 - Browser requests require a random bearer token stored in `chrome.storage.local` and restricted to trusted extension contexts.
 - The token file is mode `0600`; runtime/state directories and local IPC are private to the user.
 - The popup requests optional host permission for only the configured broker hostname.
@@ -180,7 +174,7 @@ Default host paths:
 | Socket/lock with `XDG_RUNTIME_DIR` | `$XDG_RUNTIME_DIR/pi-annotate/` |
 | Socket/lock fallback | `/tmp/pi-annotate-<uid>/` |
 
-Advanced overrides: `PI_ANNOTATE_PORT`, `PI_ANNOTATE_RUNTIME_DIR`, `PI_ANNOTATE_STATE_DIR`, `PI_ANNOTATE_SOCKET`, `PI_ANNOTATE_TOKEN_FILE`, and `PI_ANNOTATE_ALLOWED_ORIGINS`.
+Advanced overrides: `PI_ANNOTATE_PORT`, `PI_ANNOTATE_RUNTIME_DIR`, `PI_ANNOTATE_STATE_DIR`, `PI_ANNOTATE_SOCKET`, `PI_ANNOTATE_TOKEN_FILE`, and `PI_ANNOTATE_ALLOWED_ORIGINS`. Set `PI_ANNOTATE_TAILSCALE=off` to disable automatic Serve configuration intentionally.
 
 ## Project layout
 
@@ -191,6 +185,7 @@ Advanced overrides: `PI_ANNOTATE_PORT`, `PI_ANNOTATE_RUNTIME_DIR`, `PI_ANNOTATE_
 | `broker/daemon.js` | Detached shared broker lifecycle |
 | `broker/server.js` | HTTP API, authentication, CORS, routing, acknowledgements |
 | `broker/client.js` | Pi session registration and reconnecting local IPC client |
+| `broker/tailscale.js` | Conflict-safe automatic Tailscale Serve setup and endpoint discovery |
 | `chrome-extension/background.js` | Credential storage, broker requests, screenshots, tab injection |
 | `chrome-extension/popup.html` / `popup.js` | Broker setup and live session selection |
 | `chrome-extension/content.js` | Element picker and annotation UI |
@@ -221,7 +216,8 @@ kill "$(cat "$RUNTIME_DIR/broker.lock")"
 | Problem | Fix |
 |---|---|
 | Popup says no sessions are available | Run `/annotate` in the target Pi session, then click **Refresh** |
-| Broker cannot be reached | Check `tailscale status` and `tailscale serve status`; confirm the popup uses the reported HTTPS origin |
+| `/annotate` reports a Tailscale warning | Resolve the reported connectivity, HTTPS-consent, or port-conflict condition, then run `/annotate setup` |
+| Broker cannot be reached | Copy the exact endpoint printed by `/annotate`; check `tailscale status` and `tailscale serve status --json` |
 | Access was not granted | Click **Save & connect** again and approve the browser's host-access prompt |
 | Authentication fails | Run `/annotate setup` and paste the current token again |
 | Delivery fails after annotation | Keep the UI open, refresh the popup session list if needed, then click **Retry** |

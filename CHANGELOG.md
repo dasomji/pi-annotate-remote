@@ -9,6 +9,7 @@ All notable changes to Pi Annotate.
 - `/annotate` now makes the current Pi session available to the browser instead of opening a URL and waiting for one tool request. Browser submissions arrive as acknowledged user messages in the selected session.
 
 ### Added
+- Conflict-safe automatic Tailscale Serve setup on the broker port, with verified MagicDNS endpoint discovery, idempotent route reuse, bounded warnings, and `PI_ANNOTATE_TAILSCALE=off` as an opt-out.
 - Shared detached localhost broker with bearer authentication, private XDG-aware state, bounded requests, local IPC session registration, reconnects, exact opaque-session routing, delivery acknowledgements, and timeouts.
 - `/annotate on`, `/annotate off`, `/annotate status`, and `/annotate setup` lifecycle controls.
 - Popup broker endpoint/token setup, connection testing, live multi-session selection, refresh, loading/empty/error states, and active-tab annotation start.
@@ -18,6 +19,7 @@ All notable changes to Pi Annotate.
 - Automated broker, service-worker, popup, content delivery, and interaction-state tests.
 
 ### Changed
+- `/annotate` now prints the exact verified HTTPS endpoint and bearer token every time; `/annotate setup` forces a fresh Tailscale Serve check.
 - Multi-select is the default for every new annotation session; Single remains available in the toolbar.
 - Content scripts are injected only into the active tab after an explicit popup or keyboard action.
 - Broker host permission is optional and requested for only the configured hostname. Remote brokers require HTTPS; localhost HTTP remains available for development.
