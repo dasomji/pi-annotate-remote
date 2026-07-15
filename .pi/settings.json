@@ -1,0 +1,12 @@
+{
+  "packages": [
+    {
+      "source": "git:github.com/dasomji/pi-annotate-remote",
+      "extensions": [],
+      "skills": [],
+      "prompts": [],
+      "themes": []
+    },
+    ".."
+  ]
+}
