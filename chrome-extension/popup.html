@@ -1,16 +1,19 @@
 <!DOCTYPE html>
-<html>
+<html lang="en">
 <head>
   <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
   <style>
-    * { box-sizing: border-box; margin: 0; padding: 0; }
+    * { box-sizing: border-box; }
     body {
-      width: 320px;
+      width: 380px;
+      margin: 0;
+      padding: 16px;
       font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
       background: #18181b;
       color: #e5e5e5;
-      padding: 16px;
     }
+    button, input, select { font: inherit; }
     .header {
       display: flex;
       align-items: center;
@@ -22,215 +25,174 @@
     .logo {
       font-size: 20px;
       font-weight: 700;
-      background: linear-gradient(135deg, #a78bfa 0%, #6366f1 100%);
+      background: linear-gradient(135deg, #a78bfa, #6366f1);
       -webkit-background-clip: text;
       -webkit-text-fill-color: transparent;
     }
-    .title { font-size: 14px; font-weight: 600; }
-    
-    /* Status bar */
+    .title { font-size: 14px; font-weight: 650; }
     .status-bar {
       display: flex;
-      align-items: center;
+      align-items: flex-start;
       gap: 8px;
+      min-height: 38px;
       padding: 10px 12px;
+      margin-bottom: 14px;
       background: #27272a;
       border-radius: 6px;
-      margin-bottom: 14px;
     }
     .status-dot {
       width: 8px;
       height: 8px;
+      margin-top: 3px;
       border-radius: 50%;
-      background: #ef4444;
-      flex-shrink: 0;
+      background: #71717a;
+      flex: none;
     }
     .status-dot.connected { background: #22c55e; }
     .status-dot.checking { background: #eab308; animation: pulse 1s infinite; }
-    .status-dot.trouble { background: #f97316; }
-    @keyframes pulse { 50% { opacity: 0.5; } }
-    .status-text { font-size: 12px; flex: 1; }
-    
-    /* Sections */
+    .status-dot.error { background: #ef4444; }
+    @keyframes pulse { 50% { opacity: .45; } }
+    .status-text { font-size: 12px; line-height: 1.45; overflow-wrap: anywhere; }
     .section { margin-bottom: 14px; }
-    .label {
-      font-size: 10px;
-      color: #71717a;
-      text-transform: uppercase;
-      letter-spacing: 0.5px;
-      margin-bottom: 6px;
-    }
-    .field {
+    .section-heading {
       display: flex;
-      gap: 6px;
+      align-items: center;
+      justify-content: space-between;
+      margin-bottom: 7px;
     }
-    .field input {
-      flex: 1;
-      background: #27272a;
-      border: 1px solid #3f3f46;
-      border-radius: 4px;
-      color: #e5e5e5;
-      font-family: ui-monospace, monospace;
-      font-size: 11px;
-      padding: 8px 10px;
-      outline: none;
-    }
-    .field input:focus { border-color: #6366f1; }
-    
-    /* Buttons */
-    .btn {
-      background: #27272a;
-      border: 1px solid #3f3f46;
-      border-radius: 4px;
+    .label, label {
+      display: block;
+      margin-bottom: 6px;
       color: #a1a1aa;
       font-size: 11px;
-      padding: 8px 12px;
-      cursor: pointer;
-      transition: all 0.15s;
+      font-weight: 600;
     }
-    .btn:hover { background: #3f3f46; color: #e5e5e5; }
-    .btn.copied { background: #22c55e; border-color: #22c55e; color: white; }
+    .hint { margin: 6px 0 0; color: #71717a; font-size: 10px; line-height: 1.45; }
+    input, select {
+      width: 100%;
+      padding: 9px 10px;
+      color: #e5e5e5;
+      background: #27272a;
+      border: 1px solid #3f3f46;
+      border-radius: 5px;
+      outline: none;
+      font-size: 12px;
+    }
+    input:focus, select:focus { border-color: #818cf8; box-shadow: 0 0 0 2px rgba(99,102,241,.2); }
+    input::placeholder { color: #52525b; }
+    .token-field { display: flex; gap: 6px; }
+    .token-field input { min-width: 0; font-family: ui-monospace, SFMono-Regular, Menlo, monospace; }
+    .btn {
+      padding: 8px 12px;
+      color: #d4d4d8;
+      background: #27272a;
+      border: 1px solid #3f3f46;
+      border-radius: 5px;
+      cursor: pointer;
+      font-size: 11px;
+      font-weight: 600;
+    }
+    .btn:hover:not(:disabled) { background: #3f3f46; color: white; }
+    .btn:focus-visible { outline: 2px solid #818cf8; outline-offset: 2px; }
+    .btn:disabled { cursor: not-allowed; opacity: .5; }
     .btn.primary {
+      width: 100%;
+      padding: 10px 14px;
+      color: white;
       background: #6366f1;
       border-color: #6366f1;
-      color: white;
-      width: 100%;
-      padding: 10px 16px;
-      font-size: 13px;
-      font-weight: 500;
-    }
-    .btn.primary:hover { background: #4f46e5; }
-    
-    /* Ready state */
-    .ready-content {
-      text-align: center;
-      padding: 8px 0;
-    }
-    .ready-content .check {
-      font-size: 32px;
-      margin-bottom: 8px;
-    }
-    .ready-content p {
       font-size: 12px;
-      color: #a1a1aa;
-      margin-bottom: 14px;
     }
+    .btn.primary:hover:not(:disabled) { background: #4f46e5; }
+    .btn.link { padding: 4px 7px; }
+    .session-box {
+      padding: 12px;
+      background: #202023;
+      border: 1px solid #323238;
+      border-radius: 6px;
+    }
+    .empty {
+      margin: 0;
+      padding: 5px 2px;
+      color: #a1a1aa;
+      font-size: 11px;
+      line-height: 1.5;
+    }
+    .empty code { color: #c4b5fd; }
     .shortcut {
-      display: inline-block;
+      margin-top: 8px;
+      color: #71717a;
+      font-size: 10px;
+      text-align: center;
+    }
+    .shortcut kbd {
+      padding: 2px 5px;
+      color: #a1a1aa;
       background: #27272a;
       border: 1px solid #3f3f46;
-      border-radius: 4px;
-      padding: 4px 8px;
+      border-radius: 3px;
       font-family: ui-monospace, monospace;
-      font-size: 11px;
-      color: #a1a1aa;
     }
-    
-    /* Trouble state */
-    .trouble-box {
-      background: #292524;
-      border: 1px solid #44403c;
-      border-radius: 4px;
-      padding: 10px 12px;
-      font-size: 11px;
-      margin-bottom: 10px;
-    }
-    .trouble-box .title {
-      color: #f97316;
-      font-weight: 600;
-      margin-bottom: 4px;
-    }
-    .trouble-box .detail {
-      color: #a8a29e;
-      font-family: ui-monospace, monospace;
-      font-size: 10px;
-      word-break: break-all;
-    }
-    .trouble-tips {
-      font-size: 11px;
-      color: #71717a;
-      line-height: 1.6;
-    }
-    .trouble-tips li { margin-bottom: 4px; }
-    
-    /* Footer */
-    .footer {
-      font-size: 11px;
-      color: #52525b;
-      padding-top: 12px;
-      border-top: 1px solid #27272a;
-      margin-top: 4px;
-    }
-    .footer a {
-      color: #6366f1;
-      text-decoration: none;
-    }
+    .divider { height: 1px; margin: 14px 0; background: #27272a; }
+    .footer { color: #52525b; font-size: 10px; line-height: 1.45; }
+    .footer a { color: #818cf8; text-decoration: none; }
     .footer a:hover { text-decoration: underline; }
-    
     .hidden { display: none !important; }
   </style>
 </head>
 <body>
-  <div class="header">
-    <span class="logo">π</span>
+  <header class="header">
+    <span class="logo" aria-hidden="true">π</span>
     <span class="title">Pi Annotate</span>
+  </header>
+
+  <div class="status-bar" role="status" aria-live="polite">
+    <span class="status-dot" id="status-dot" aria-hidden="true"></span>
+    <span class="status-text" id="status-text">Configure a broker to begin.</span>
   </div>
 
-  <div class="status-bar">
-    <div class="status-dot checking" id="status-dot"></div>
-    <span class="status-text" id="status-text">Checking...</span>
-  </div>
-
-  <!-- Ready State -->
-  <div id="ready-section" class="hidden">
-    <div class="ready-content">
-      <div class="check">✓</div>
-      <p>Ready to annotate! Use the button below or keyboard shortcut.</p>
-      <div style="margin-bottom: 14px;">
-        <span class="shortcut" id="shortcut-key"></span>
-      </div>
-      <button class="btn primary" id="start-btn">Start Annotation</button>
-    </div>
-  </div>
-
-  <!-- Setup State -->
-  <div id="setup-section">
+  <form id="broker-form">
     <div class="section">
-      <div class="label">Extension ID</div>
-      <div class="field">
-        <input type="text" id="ext-id" readonly>
-        <button class="btn" id="copy-id">Copy</button>
-      </div>
+      <label for="broker-endpoint">Broker endpoint</label>
+      <input id="broker-endpoint" type="url" inputmode="url" autocomplete="url"
+        placeholder="https://machine.tailnet.ts.net" required>
+      <p class="hint">Use the HTTPS address printed by <code>/annotate setup</code>.</p>
     </div>
 
     <div class="section">
-      <div class="label">Install Command</div>
-      <div class="field">
-        <input type="text" id="install-cmd" readonly>
-        <button class="btn" id="copy-cmd">Copy</button>
+      <label for="broker-token">Broker token</label>
+      <div class="token-field">
+        <input id="broker-token" type="password" autocomplete="off" spellcheck="false" required>
+        <button class="btn" id="toggle-token" type="button" aria-label="Show broker token">Show</button>
       </div>
     </div>
-  </div>
 
-  <!-- Trouble State -->
-  <div id="trouble-section" class="hidden">
-    <div class="trouble-box">
-      <div class="title">⚠ Connection Issue</div>
-      <div class="detail" id="trouble-detail"></div>
-    </div>
-    <ul class="trouble-tips">
-      <li>Re-run install command with correct ID</li>
-      <li id="quit-tip">Fully quit Chrome and reopen</li>
-      <li>Check that paths exist in install output</li>
-    </ul>
-    <div style="margin-top: 10px;">
-      <button class="btn" id="retry-btn" style="width: 100%;">Retry Connection</button>
-    </div>
-  </div>
+    <button class="btn primary" id="save-btn" type="submit">Save &amp; connect</button>
+  </form>
 
-  <div class="footer">
-    <a href="https://github.com/nicobailon/pi-annotate#quick-start" target="_blank">Setup Guide →</a>
-  </div>
+  <div class="divider"></div>
+
+  <section class="section" aria-labelledby="sessions-heading">
+    <div class="section-heading">
+      <span class="label" id="sessions-heading">Annotation session</span>
+      <button class="btn link" id="refresh-btn" type="button">Refresh</button>
+    </div>
+    <div class="session-box">
+      <select id="session-select" aria-label="Annotation session" disabled>
+        <option value="">No sessions available</option>
+      </select>
+      <p class="empty" id="empty-sessions">Run <code>/annotate</code> in the Pi session you want to target, then refresh.</p>
+    </div>
+  </section>
+
+  <button class="btn primary" id="start-btn" type="button" disabled>Start annotation</button>
+  <div class="shortcut">Keyboard shortcut: <kbd id="shortcut-key">Ctrl+Shift+P</kbd></div>
+
+  <div class="divider"></div>
+  <footer class="footer">
+    The token stays in this browser profile and broker requests are made only by the extension service worker.
+    <a href="https://github.com/nicobailon/pi-annotate#quick-start" target="_blank" rel="noreferrer">Setup guide →</a>
+  </footer>
 
   <script src="popup.js"></script>
 </body>

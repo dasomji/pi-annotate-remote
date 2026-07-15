@@ -1,15 +1,16 @@
 import { Type } from "typebox";
-import type { ExtensionAPI } from "@mariozechner/pi-coding-agent";
-import * as net from "node:net";
+import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
+import { execFileSync } from "node:child_process";
+import { randomUUID } from "node:crypto";
 import * as fs from "node:fs";
 import * as path from "node:path";
 import * as os from "node:os";
+import { fileURLToPath } from "node:url";
+import { AnnotationSessionClient, ensureBrokerRunning } from "./broker/client.js";
+import { getBrokerConfig } from "./broker/config.js";
 import type { AnnotationResult, ElementSelection, EditCapture } from "./types.js";
 
-const SOCKET_PATH = "/tmp/pi-annotate.sock";
-const TOKEN_PATH = "/tmp/pi-annotate.token";
-const MAX_SOCKET_BUFFER = 32 * 1024 * 1024; // 32MB (increased from 8MB for edit capture payloads)
-const MAX_SCREENSHOT_BYTES = 15 * 1024 * 1024; // 15MB
+const MAX_SCREENSHOT_BYTES = 15 * 1024 * 1024;
 
 type AnnotationContext = {
   hasUI?: boolean;
@@ -19,208 +20,136 @@ type AnnotationContext = {
   };
 };
 
-export default function (pi: ExtensionAPI) {
-  let browserSocket: net.Socket | null = null;
-  const pendingRequests = new Map<number, (result: AnnotationResult) => void | Promise<void>>();
-  let dataBuffer = ""; // Buffer for incomplete JSON messages
-  let authToken: string | null = null;
-  let currentCtx: AnnotationContext | null = null;
-  
-  function setStatus(message: string) {
-    if (currentCtx?.ui?.setStatus) {
-      currentCtx.ui.setStatus("pi-annotate", message);
-    }
+function gitBranch(cwd: string): string {
+  try {
+    const branch = execFileSync("git", ["rev-parse", "--abbrev-ref", "HEAD"], {
+      cwd,
+      encoding: "utf8",
+      stdio: ["ignore", "pipe", "ignore"],
+      timeout: 1500,
+    }).trim();
+    if (branch && branch !== "HEAD") return branch;
+    return execFileSync("git", ["rev-parse", "--short", "HEAD"], {
+      cwd,
+      encoding: "utf8",
+      stdio: ["ignore", "pipe", "ignore"],
+      timeout: 1500,
+    }).trim() || "detached";
+  } catch {
+    return "no-branch";
   }
-  
-  // ─────────────────────────────────────────────────────────────────────
-  // /annotate Command
-  // ─────────────────────────────────────────────────────────────────────
-  
-  const annotateHandler = async (args: string, ctx: AnnotationContext) => {
+}
+
+function createSessionLabel(cwd = process.cwd()): string {
+  const project = path.basename(cwd) || "project";
+  const label = `${project} (${gitBranch(cwd)})`.replace(/[\u0000-\u001f\u007f]/g, " ");
+  return label.slice(0, 200);
+}
+
+export default function (pi: ExtensionAPI) {
+  const brokerConfig = getBrokerConfig();
+  const daemonPath = fileURLToPath(new URL("./broker/daemon.js", import.meta.url));
+  const sessionId = randomUUID();
+  const sessionLabel = createSessionLabel();
+  let annotationClient: AnnotationSessionClient | null = null;
+  let brokerToken: string | null = null;
+  let currentCtx: AnnotationContext | null = null;
+  let setupShown = false;
+
+  function setStatus(message: string) {
+    currentCtx?.ui?.setStatus?.("pi-annotate", message);
+  }
+
+  function setupInstructions(token: string): string {
+    const localEndpoint = `http://${brokerConfig.host}:${brokerConfig.port}`;
+    return [
+      `Annotation session available as ${sessionLabel}`,
+      "",
+      "Configure the browser extension with:",
+      `Endpoint: your Tailscale Serve HTTPS URL`,
+      `Token: ${token}`,
+      "",
+      "If Tailscale Serve is not configured, run on this machine:",
+      `tailscale serve --bg --https=443 ${localEndpoint}`,
+      "Then use the HTTPS URL reported by `tailscale serve status` in the browser popup.",
+    ].join("\n");
+  }
+
+  async function enableAnnotationSession(ctx: AnnotationContext): Promise<string> {
     currentCtx = ctx;
-    const url = args.trim() || undefined;
-    
-    try {
-      await connectToHost();
-    } catch (err) {
-      const message = err instanceof Error ? err.message : String(err);
-      ctx.ui?.notify(`Browser extension not connected. ${message}. Click the Pi Annotate icon in the browser to wake the service worker, then retry.`, "error");
+    if (!annotationClient) {
+      annotationClient = new AnnotationSessionClient({
+        sessionId,
+        label: sessionLabel,
+        socketPath: brokerConfig.socketPath,
+        ensureBroker: async () => {
+          brokerToken = await ensureBrokerRunning({ config: brokerConfig, daemonPath });
+          return brokerToken;
+        },
+        onStatus: setStatus,
+        onAnnotation: async (value: unknown) => {
+          if (!isAnnotationResult(value)) throw new Error("Annotation payload is invalid");
+          const text = await formatResult(value);
+          pi.sendUserMessage(text);
+          setStatus("Annotation delivered");
+        },
+      });
+    }
+    await annotationClient.enable();
+    if (!brokerToken) {
+      brokerToken = await ensureBrokerRunning({ config: brokerConfig, daemonPath });
+    }
+    return brokerToken;
+  }
+
+  async function annotateHandler(args: string, ctx: AnnotationContext) {
+    currentCtx = ctx;
+    const action = args.trim().toLowerCase();
+
+    if (action === "off") {
+      annotationClient?.disable();
+      ctx.ui?.notify?.(`Annotation session disabled: ${sessionLabel}`, "info");
       return;
     }
-    
-    const requestId = Date.now();
-    sendToHost({
-      type: "START_ANNOTATION",
-      requestId,
-      url,
-    });
-    
-    ctx.ui?.notify(url ? `Opening annotation mode on ${url}` : "Annotation mode started on current browser tab", "info");
-  };
 
-  pi.registerCommand("annotate", {
-    description: "Start visual annotation mode in the browser. Optionally provide a URL.",
-    handler: annotateHandler,
-  });
-  
-  // ─────────────────────────────────────────────────────────────────────
-  // Socket Connection
-  // ─────────────────────────────────────────────────────────────────────
-  
-  function connectToHost(): Promise<void> {
-    return new Promise((resolve, reject) => {
-      if (browserSocket && !browserSocket.destroyed) {
-        resolve();
-        return;
+    if (action === "status") {
+      const state = annotationClient?.registered ? "available" : "unavailable";
+      ctx.ui?.notify?.(`Annotation session is ${state}: ${sessionLabel}`, "info");
+      return;
+    }
+
+    if (action && !["on", "setup"].includes(action)) {
+      ctx.ui?.notify?.("Usage: /annotate [on|off|status|setup]", "error");
+      return;
+    }
+
+    try {
+      const token = await enableAnnotationSession(ctx);
+      if (action === "setup" || !setupShown) {
+        ctx.ui?.notify?.(setupInstructions(token), "info");
+        setupShown = true;
+      } else {
+        ctx.ui?.notify?.(`Annotation session available as ${sessionLabel}`, "info");
       }
-
-      try {
-        authToken = fs.readFileSync(TOKEN_PATH, "utf8").trim();
-      } catch (err) {
-        const message = err instanceof Error ? err.message : String(err);
-        reject(new Error(`Failed to read auth token at ${TOKEN_PATH}: ${message}`, { cause: err }));
-        return;
-      }
-
-      browserSocket = net.createConnection(SOCKET_PATH);
-      
-      browserSocket.on("connect", () => {
-        setStatus("Connected to native host");
-        sendToHost({ type: "AUTH", token: authToken });
-        resolve();
-      });
-      
-      browserSocket.on("data", (data) => {
-        // Buffer incoming data and split by newlines
-        dataBuffer += data.toString();
-        if (dataBuffer.length > MAX_SOCKET_BUFFER) {
-          setStatus("Error: Socket buffer overflow");
-          browserSocket?.destroy();
-          dataBuffer = "";
-          return;
-        }
-        const lines = dataBuffer.split("\n");
-        
-        // Keep the last incomplete line in the buffer
-        dataBuffer = lines.pop() || "";
-        
-        for (const line of lines) {
-          if (!line.trim()) continue;
-          try {
-            const msg = JSON.parse(line);
-            void handleMessage(msg);
-          } catch (err) {
-            const message = err instanceof Error ? err.message : String(err);
-            setStatus(`Error: Failed to parse message: ${message}`);
-          }
-        }
-      });
-      
-      browserSocket.on("error", (err) => {
-        setStatus(`Error: ${err.message}`);
-        reject(err);
-      });
-      
-      browserSocket.on("close", () => {
-        setStatus("Disconnected from native host");
-        browserSocket = null;
-        authToken = null;
-        dataBuffer = "";
-        for (const [, resolvePending] of pendingRequests) {
-          resolvePending({
-            success: false,
-            cancelled: true,
-            reason: "connection_lost",
-            elements: [],
-            url: "",
-            viewport: { width: 0, height: 0 },
-          });
-        }
-        pendingRequests.clear();
-      });
-    });
-  }
-  
-  function sendToHost(msg: object) {
-    if (browserSocket && !browserSocket.destroyed) {
-      browserSocket.write(JSON.stringify(msg) + "\n");
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      ctx.ui?.notify?.(`Could not start annotation broker: ${message}`, "error");
     }
   }
-  
+
+  pi.registerCommand("annotate", {
+    description: "Make this Pi session available for browser annotations. Use off, status, or setup as needed.",
+    handler: annotateHandler,
+  });
+
   function isRecord(value: unknown): value is Record<string, unknown> {
     return !!value && typeof value === "object" && !Array.isArray(value);
   }
 
   function isAnnotationResult(value: unknown): value is AnnotationResult {
-    if (!isRecord(value)) return false;
-    if (typeof value.success !== "boolean") return false;
-    return true;
+    return isRecord(value) && typeof value.success === "boolean";
   }
 
-  async function handleMessage(msg: unknown) {
-    if (!isRecord(msg) || typeof msg.type !== "string") return;
-    
-    setStatus(`Received: ${msg.type}`);
-
-    const requestId = typeof msg.requestId === "number" ? msg.requestId : null;
-
-    if (msg.type === "SESSION_REPLACED") {
-      // Another terminal took over the annotation session
-      setStatus("Session replaced by another terminal");
-      const reason = typeof msg.reason === "string" ? msg.reason : "Session replaced by another terminal";
-      
-      // Resolve all pending requests with cancelled status
-      for (const [, resolvePending] of pendingRequests) {
-        await resolvePending({
-          success: false,
-          cancelled: true,
-          reason,
-          elements: [],
-          url: "",
-          viewport: { width: 0, height: 0 },
-        });
-      }
-      pendingRequests.clear();
-      
-      // Connection will be destroyed by native host, so clean up
-      browserSocket = null;
-      dataBuffer = "";
-      return;
-    }
-
-    if (msg.type === "ANNOTATIONS_COMPLETE") {
-      if (!isAnnotationResult(msg.result)) return;
-      if (requestId && pendingRequests.has(requestId)) {
-        // Tool flow - resolve the promise
-        const resolvePending = pendingRequests.get(requestId);
-        if (!resolvePending) return;
-        pendingRequests.delete(requestId);
-        await resolvePending(msg.result);
-      } else {
-        // Command flow - inject as user message
-        const result = msg.result;
-        const text = await formatResult(result);
-        setStatus("Annotation complete");
-        pi.sendUserMessage(text);
-      }
-    } else if (msg.type === "CANCEL") {
-      if (requestId && pendingRequests.has(requestId)) {
-        const resolvePending = pendingRequests.get(requestId);
-        if (!resolvePending) return;
-        pendingRequests.delete(requestId);
-        await resolvePending({
-          success: false,
-          cancelled: true,
-          reason: typeof msg.reason === "string" ? msg.reason : "user",
-          elements: [],
-          url: "",
-          viewport: { width: 0, height: 0 },
-        });
-      }
-      // For command flow, cancel is just ignored (UI already closed)
-    }
-  }
-  
   // ─────────────────────────────────────────────────────────────────────
   // Format Result
   // ─────────────────────────────────────────────────────────────────────
@@ -480,101 +409,51 @@ export default function (pi: ExtensionAPI) {
   }
   
   // ─────────────────────────────────────────────────────────────────────
-  // Tool Registration
+  // Tool Registration and Cleanup
   // ─────────────────────────────────────────────────────────────────────
-  
+
   pi.registerTool({
     name: "annotate",
     label: "Annotate",
     description:
-      "Open visual annotation mode in the browser so the user can click/select elements and add comments. " +
-      "Only use when the user explicitly asks to annotate, visually point something out, or show you UI issues. " +
-      "Returns structured annotations with CSS selectors and element info. " +
-      "If no URL is provided, uses the current active browser tab.",
+      "Make this Pi session available to receive visual browser annotations. " +
+      "Use only when the user explicitly asks to annotate, visually point something out, or show UI issues. " +
+      "The user selects this session in the Pi Annotate browser popup and submits the annotation there.",
     promptSnippet:
-      "Use only when the user explicitly asks for visual annotation or UI pointing. Call with {url?} and return selected element annotations.",
-    parameters: Type.Object({
-      url: Type.Optional(Type.String({
-        description: "URL to annotate. If omitted, uses the current browser tab.",
-      })),
-      timeout: Type.Optional(Type.Number({
-        description: "Max seconds to wait for annotations. Default: 300 (5 min)",
-      })),
-    }),
+      "Use only when the user explicitly asks for visual annotation or UI pointing. The tool makes this session available in the browser popup.",
+    parameters: Type.Object({}, { additionalProperties: false }),
 
-    async execute(_toolCallId, params, signal, _onUpdate, ctx) {
+    async execute(_toolCallId, _params, _signal, _onUpdate, ctx) {
       currentCtx = ctx;
-      const { url, timeout = 300 } = params as { url?: string; timeout?: number };
-      const requestId = Date.now();
-
-      // Try to connect first
       try {
-        await connectToHost();
-      } catch (err) {
-        const message = err instanceof Error ? err.message : String(err);
+        const token = await enableAnnotationSession(ctx);
+        if (!setupShown && ctx.hasUI) {
+          ctx.ui.notify(setupInstructions(token), "info");
+          setupShown = true;
+        }
         return {
-          content: [{ type: "text", text: "Browser extension not connected. Click the Pi Annotate icon in the browser to wake the service worker, then retry." }],
+          content: [{
+            type: "text",
+            text: `Annotation session is available as ${sessionLabel}. Select it in the Pi Annotate browser popup and submit the annotation.`,
+          }],
+          details: {
+            sessionId,
+            label: sessionLabel,
+            localEndpoint: `http://${brokerConfig.host}:${brokerConfig.port}`,
+          },
+        };
+      } catch (error) {
+        const message = error instanceof Error ? error.message : String(error);
+        return {
+          content: [{ type: "text", text: `Could not start annotation broker: ${message}` }],
           details: { error: message },
         };
       }
-
-      return new Promise((resolve) => {
-        let timeoutId: NodeJS.Timeout | null = null;
-        
-        const cleanup = () => {
-          if (timeoutId) clearTimeout(timeoutId);
-          pendingRequests.delete(requestId);
-          signal?.removeEventListener("abort", onAbort);
-        };
-
-        const onAbort = () => {
-          cleanup();
-          sendToHost({ type: "CANCEL", requestId, reason: "aborted" });
-          resolve({
-            content: [{ type: "text", text: "Annotation was aborted." }],
-            details: { aborted: true },
-          });
-        };
-        
-        // Handle abort signal
-        if (signal?.aborted) {
-          return resolve({
-            content: [{ type: "text", text: "Annotation was aborted." }],
-            details: { aborted: true },
-          });
-        }
-        signal?.addEventListener("abort", onAbort);
-        
-        // Set up response handler
-        pendingRequests.set(requestId, async (result) => {
-          cleanup();
-          resolve({
-            content: [{ type: "text", text: await formatResult(result) }],
-            details: result,
-          });
-        });
-        
-        // Set timeout
-        timeoutId = setTimeout(() => {
-          cleanup();
-          sendToHost({ type: "CANCEL", requestId, reason: "timeout" });
-          resolve({
-            content: [{ type: "text", text: `Annotation timed out after ${timeout}s` }],
-            details: { timeout: true },
-          });
-        }, timeout * 1000);
-        
-        // Send start message
-        sendToHost({
-          type: "START_ANNOTATION",
-          requestId,
-          url,
-        });
-        
-        if (ctx.hasUI) {
-          ctx.ui.notify("Annotation mode started in the browser", "info");
-        }
-      });
     },
+  });
+
+  pi.on("session_shutdown", async () => {
+    annotationClient?.disable();
+    annotationClient = null;
   });
 }

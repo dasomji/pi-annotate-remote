@@ -4,6 +4,33 @@ All notable changes to Pi Annotate.
 
 ## [Unreleased]
 
+### Breaking
+- Replaced the same-machine Native Messaging transport with a broker-only HTTPS flow. Existing browser installations must reload the unpacked extension, configure a Tailscale Serve endpoint and token, and grant endpoint-scoped host access.
+- `/annotate` now makes the current Pi session available to the browser instead of opening a URL and waiting for one tool request. Browser submissions arrive as acknowledged user messages in the selected session.
+
+### Added
+- Shared detached localhost broker with bearer authentication, private XDG-aware state, bounded requests, local IPC session registration, reconnects, exact opaque-session routing, delivery acknowledgements, and timeouts.
+- `/annotate on`, `/annotate off`, `/annotate status`, and `/annotate setup` lifecycle controls.
+- Popup broker endpoint/token setup, connection testing, live multi-session selection, refresh, loading/empty/error states, and active-tab annotation start.
+- Draggable minimized annotation bubble with selection count and no reserved bottom-page space.
+- Accessible three-Escape abort confirmation flow; Escape no longer immediately discards annotation work.
+- Delivery retry state that preserves the content UI until the selected Pi session acknowledges receipt.
+- Automated broker, service-worker, popup, content delivery, and interaction-state tests.
+
+### Changed
+- Multi-select is the default for every new annotation session; Single remains available in the toolbar.
+- Content scripts are injected only into the active tab after an explicit popup or keyboard action.
+- Broker host permission is optional and requested for only the configured hostname. Remote brokers require HTTPS; localhost HTTP remains available for development.
+- Pi sessions are labelled with project directory and Git branch while routing uses a random opaque ID.
+
+### Security
+- Restricted the saved bearer token to trusted extension contexts.
+- Kept the broker on `127.0.0.1` by default and exposed only bounded `{id, label}` session metadata.
+- Removed persistent `<all_urls>` host permission and ensured broker requests originate only from the extension service worker.
+
+### Removed
+- Native Messaging permission, host bridge, installer scripts, request socket protocol, and native-host setup/troubleshooting flow.
+
 ## [0.4.3] - 2026-04-22
 
 ### Fixed

@@ -3,43 +3,32 @@
   "name": "Pi Annotate",
   "version": "0.4.0",
   "description": "Visual annotation tool for Pi coding agent",
-  
   "permissions": [
     "activeTab",
-    "nativeMessaging",
-    "scripting"
+    "scripting",
+    "storage"
   ],
-  "host_permissions": [
-    "<all_urls>"
+  "optional_host_permissions": [
+    "https://*/*",
+    "http://localhost/*",
+    "http://127.0.0.1/*"
   ],
-  
   "background": {
     "service_worker": "background.js"
   },
-  
-  "content_scripts": [
-    {
-      "matches": ["<all_urls>"],
-      "js": ["content.js"],
-      "run_at": "document_idle"
-    }
-  ],
-  
   "commands": {
     "toggle-picker": {
       "suggested_key": {
         "default": "Ctrl+Shift+P",
         "mac": "Command+Shift+P"
       },
-      "description": "Toggle element picker"
+      "description": "Start annotation for the selected Pi session"
     }
   },
-  
   "action": {
     "default_title": "Pi Annotate",
     "default_popup": "popup.html"
   },
-  
   "icons": {
     "16": "icons/icon16.png",
     "48": "icons/icon48.png",

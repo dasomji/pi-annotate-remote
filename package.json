@@ -7,14 +7,19 @@
   "license": "MIT",
   "repository": {
     "type": "git",
-    "url": "git+https://github.com/nicobailon/pi-annotate.git"
+    "url": "git+https://github.com/dasomji/pi-annotate-remote.git"
   },
   "bugs": {
-    "url": "https://github.com/nicobailon/pi-annotate/issues"
+    "url": "https://github.com/dasomji/pi-annotate-remote/issues"
   },
-  "homepage": "https://github.com/nicobailon/pi-annotate#readme",
-  "dependencies": {
-    "typebox": "^1.1.24"
+  "homepage": "https://github.com/dasomji/pi-annotate-remote#readme",
+  "scripts": {
+    "test": "node --test test/*.test.js",
+    "check": "node --check index.ts && node --check broker/*.js && node --check chrome-extension/*.js"
+  },
+  "peerDependencies": {
+    "@earendil-works/pi-coding-agent": "*",
+    "typebox": "*"
   },
   "keywords": [
     "pi-package",
@@ -28,6 +33,7 @@
   "files": [
     "index.ts",
     "types.ts",
+    "broker/",
     "banner.png",
     "demo.mp4",
     "chrome-extension/",
@@ -39,6 +45,6 @@
     "extensions": [
       "./index.ts"
     ],
-    "video": "https://github.com/nicobailon/pi-annotate/raw/refs/heads/main/demo.mp4"
+    "video": "https://github.com/dasomji/pi-annotate-remote/raw/refs/heads/main/demo.mp4"
   }
 }

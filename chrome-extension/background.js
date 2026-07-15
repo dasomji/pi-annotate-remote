@@ -1,276 +1,300 @@
 /**
  * Pi Annotate - Background Service Worker
- * 
- * Connects to native messaging host and forwards messages between
- * the native host (Pi) and content scripts.
+ *
+ * Owns broker credentials and all broker network requests. Popup and content
+ * scripts communicate with the broker only through runtime messages.
  */
 
-let nativePort = null;
-let pendingPing = null;
-let lastNativeDisconnectError = "";
-const requestTabs = new Map();
+const STORAGE_KEYS = ["brokerEndpoint", "brokerToken", "selectedSessionId"];
+const BROKER_TIMEOUT_MS = 20_000;
+const MAX_ERROR_LENGTH = 300;
+const MAX_SESSION_COUNT = 1_000;
 
-function getRequestId(msg) {
-  return typeof msg.requestId === "number" ? msg.requestId : (typeof msg.id === "number" ? msg.id : null);
+// Keep the bearer token out of content-script contexts. Popup and service
+// worker pages remain trusted extension contexts and can still use local storage.
+chrome.storage.local.setAccessLevel({ accessLevel: "TRUSTED_CONTEXTS" }).catch(() => {});
+
+function boundedMessage(value, fallback = "Broker request failed") {
+  const message = typeof value === "string" && value.trim() ? value.trim() : fallback;
+  return message.replace(/[\r\n\t]+/g, " ").slice(0, MAX_ERROR_LENGTH);
+}
+
+function publicError(error) {
+  if (error?.name === "AbortError") return "Broker request timed out";
+  return boundedMessage(error instanceof Error ? error.message : String(error));
+}
+
+function normalizeBrokerEndpoint(value) {
+  if (typeof value !== "string" || !value.trim()) {
+    throw new Error("Enter a broker endpoint");
+  }
+
+  let url;
+  try {
+    url = new URL(value.trim());
+  } catch {
+    throw new Error("Enter a valid broker URL");
+  }
+
+  const isLocalHttp = url.protocol === "http:" && ["localhost", "127.0.0.1"].includes(url.hostname);
+  if (url.protocol !== "https:" && !isLocalHttp) {
+    throw new Error("Broker endpoint must use HTTPS (HTTP is allowed only for localhost)");
+  }
+  if (url.username || url.password) {
+    throw new Error("Broker endpoint must not contain credentials");
+  }
+  if ((url.pathname && url.pathname !== "/") || url.search || url.hash) {
+    throw new Error("Broker endpoint must be an origin without a path, query, or fragment");
+  }
+
+  return url.origin;
+}
+
+function permissionOrigin(endpoint) {
+  const url = new URL(normalizeBrokerEndpoint(endpoint));
+  // Chrome match patterns omit ports and therefore cover every port on one host.
+  return `${url.protocol}//${url.hostname}/*`;
+}
+
+function validateToken(value) {
+  if (typeof value !== "string" || !value.trim()) {
+    throw new Error("Enter the broker token shown by /annotate setup");
+  }
+  const token = value.trim();
+  if (token.length > 4_096) throw new Error("Broker token is too long");
+  return token;
+}
+
+function validateSessionId(value) {
+  if (typeof value !== "string" || value.length < 12 || value.length > 200) {
+    throw new Error("Select a valid annotation session");
+  }
+  return value;
+}
+
+async function getStoredConfig({ requireComplete = false } = {}) {
+  const stored = await chrome.storage.local.get(STORAGE_KEYS);
+  const endpoint = stored.brokerEndpoint ? normalizeBrokerEndpoint(stored.brokerEndpoint) : "";
+  const token = typeof stored.brokerToken === "string" ? stored.brokerToken : "";
+  const selectedSessionId = typeof stored.selectedSessionId === "string" ? stored.selectedSessionId : "";
+
+  if (requireComplete) {
+    if (!endpoint) throw new Error("Configure a broker endpoint first");
+    validateToken(token);
+  }
+
+  return { endpoint, token, selectedSessionId };
+}
+
+async function saveBrokerConfig(message) {
+  const endpoint = normalizeBrokerEndpoint(message.endpoint);
+  const token = validateToken(message.token);
+  const previous = await getStoredConfig();
+  const changed = previous.endpoint !== endpoint || previous.token !== token;
+
+  await chrome.storage.local.set({
+    brokerEndpoint: endpoint,
+    brokerToken: token,
+    selectedSessionId: changed ? "" : previous.selectedSessionId,
+  });
+
+  if (
+    previous.endpoint &&
+    previous.endpoint !== endpoint &&
+    permissionOrigin(previous.endpoint) !== permissionOrigin(endpoint)
+  ) {
+    try {
+      await chrome.permissions.remove({ origins: [permissionOrigin(previous.endpoint)] });
+    } catch {
+      // A stale optional permission is harmless; never fail a saved config over cleanup.
+    }
+  }
+
+  return { endpoint, selectedSessionId: changed ? "" : previous.selectedSessionId };
+}
+
+async function readBrokerResponse(response) {
+  const text = await response.text();
+  if (!text) return null;
+  if (text.length > 256 * 1024) throw new Error("Broker response was too large");
+  try {
+    return JSON.parse(text);
+  } catch {
+    throw new Error("Broker returned an invalid response");
+  }
+}
+
+async function brokerRequest(path, options = {}) {
+  const { endpoint, token } = await getStoredConfig({ requireComplete: true });
+  const controller = new AbortController();
+  const timeout = setTimeout(() => controller.abort(), BROKER_TIMEOUT_MS);
+
+  try {
+    const response = await fetch(`${endpoint}${path}`, {
+      ...options,
+      headers: {
+        Accept: "application/json",
+        Authorization: `Bearer ${token}`,
+        ...(options.headers || {}),
+      },
+      signal: controller.signal,
+    });
+    const body = await readBrokerResponse(response);
+    if (!response.ok) {
+      throw new Error(boundedMessage(body?.error?.message, `Broker returned HTTP ${response.status}`));
+    }
+    return body;
+  } finally {
+    clearTimeout(timeout);
+  }
+}
+
+function sanitizeSessions(body) {
+  if (!Array.isArray(body?.sessions)) throw new Error("Broker returned an invalid session list");
+  if (body.sessions.length > MAX_SESSION_COUNT) throw new Error("Broker returned too many sessions");
+
+  return body.sessions.map((session) => {
+    const id = validateSessionId(session?.id);
+    if (typeof session?.label !== "string" || !session.label.trim() || session.label.length > 200) {
+      throw new Error("Broker returned an invalid session label");
+    }
+    return { id, label: session.label.trim() };
+  });
+}
+
+async function listSessions() {
+  const body = await brokerRequest("/v1/sessions");
+  const sessions = sanitizeSessions(body);
+  const config = await getStoredConfig();
+  const selectedSessionId = sessions.some((session) => session.id === config.selectedSessionId)
+    ? config.selectedSessionId
+    : "";
+
+  if (selectedSessionId !== config.selectedSessionId) {
+    await chrome.storage.local.set({ selectedSessionId });
+  }
+
+  return { sessions, selectedSessionId };
 }
 
 function isRestrictedUrl(url) {
   if (!url) return true;
-  return /^(chrome|chrome-extension|edge|about|devtools|view-source):/.test(url);
+  return /^(chrome|chrome-extension|edge|about|devtools|view-source):/i.test(url);
 }
 
-function resolvePendingPing(result) {
-  if (!pendingPing) return;
-  clearTimeout(pendingPing.timeoutId);
-  pendingPing.resolve(result);
-  pendingPing = null;
-}
-
-function pingNative() {
-  if (!nativePort) {
-    return Promise.resolve({
-      connected: false,
-      error: lastNativeDisconnectError || "Native host not connected",
+async function sendToContentScript(tabId, message) {
+  try {
+    await chrome.tabs.sendMessage(tabId, message);
+  } catch {
+    await chrome.scripting.executeScript({
+      target: { tabId },
+      files: ["content.js"],
     });
+    await chrome.tabs.sendMessage(tabId, message);
+  }
+}
+
+async function startAnnotation(requestedSessionId) {
+  const config = await getStoredConfig({ requireComplete: true });
+  const sessionId = validateSessionId(requestedSessionId || config.selectedSessionId);
+  await chrome.storage.local.set({ selectedSessionId: sessionId });
+
+  const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
+  if (!tab?.id || isRestrictedUrl(tab.url)) {
+    throw new Error("Open a regular web page before starting annotation");
   }
 
-  if (pendingPing) {
-    return pendingPing.promise;
+  await sendToContentScript(tab.id, { type: "START_ANNOTATION", sessionId });
+  return { started: true };
+}
+
+async function deliverAnnotations(message) {
+  const sessionId = validateSessionId(message.sessionId);
+  if (!message.result || typeof message.result !== "object" || message.result.success !== true) {
+    throw new Error("Annotation result is invalid");
   }
 
-  let resolvePing;
-  const promise = new Promise((resolve) => {
-    resolvePing = resolve;
+  await brokerRequest(`/v1/sessions/${encodeURIComponent(sessionId)}/annotations`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(message.result),
   });
 
-  const timeoutId = setTimeout(() => {
-    if (!pendingPing || pendingPing.promise !== promise) return;
-    pendingPing = null;
-    resolvePing({ connected: false, error: "Timeout - native host not responding" });
-  }, 3000);
-
-  pendingPing = { promise, resolve: resolvePing, timeoutId };
-
-  try {
-    nativePort.postMessage({ type: "PING" });
-  } catch (err) {
-    clearTimeout(timeoutId);
-    pendingPing = null;
-    resolvePing({
-      connected: false,
-      error: err instanceof Error ? err.message : String(err),
-    });
-  }
-
-  return promise;
+  return { delivered: true };
 }
 
-function sendToNative(msg) {
-  if (!nativePort) {
-    console.error("[pi-annotate] Cannot send to native host - not connected");
-    return;
-  }
-  try {
-    nativePort.postMessage(msg);
-  } catch (err) {
-    console.error("[pi-annotate] Failed to send to native host:", err);
-  }
-}
-
-// Send message to content script, injecting it first if needed
-async function sendToContentScript(tabId, msg) {
-  try {
-    await chrome.tabs.sendMessage(tabId, msg);
-  } catch (err) {
-    console.log("[pi-annotate] Content script not found, injecting...");
-    try {
-      await chrome.scripting.executeScript({
-        target: { tabId },
-        files: ["content.js"],
-      });
-      await new Promise(r => setTimeout(r, 100));
-      await chrome.tabs.sendMessage(tabId, msg);
-    } catch (injectErr) {
-      console.error("[pi-annotate] Failed to inject:", injectErr.message);
-      const requestId = getRequestId(msg);
-      if (requestId) {
-        requestTabs.delete(requestId);
-        sendToNative({ type: "CANCEL", requestId, reason: `Cannot inject into tab: ${injectErr.message}` });
-      }
-    }
-  }
-}
-
-// Wait for a tab to finish loading, then inject content script
-function injectAfterLoad(tabId, msg, requestId) {
-  let timeoutId = null;
-  const listener = (updatedTabId, info) => {
-    if (updatedTabId === tabId && info.status === "complete") {
-      if (timeoutId) clearTimeout(timeoutId);
-      chrome.tabs.onUpdated.removeListener(listener);
-      setTimeout(() => {
-        if (requestId) requestTabs.set(requestId, tabId);
-        sendToContentScript(tabId, msg);
-      }, 150);
-    }
-  };
-  chrome.tabs.onUpdated.addListener(listener);
-
-  timeoutId = setTimeout(() => {
-    chrome.tabs.onUpdated.removeListener(listener);
-    console.log("[pi-annotate] Navigation timeout - listener removed");
-    if (requestId) {
-      requestTabs.delete(requestId);
-      sendToNative({ type: "CANCEL", requestId, reason: "navigation_timeout" });
-    }
-  }, 30000);
-}
-
-// Toggle annotation picker on active tab (used by popup + keyboard shortcut)
-async function togglePicker() {
-  try {
-    const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
-    if (!tab?.id || isRestrictedUrl(tab.url)) {
-      console.log("[pi-annotate] Cannot toggle picker: no valid tab");
-      return;
-    }
-    await sendToContentScript(tab.id, { type: "TOGGLE_PICKER" });
-  } catch (err) {
-    console.error("[pi-annotate] Toggle picker failed:", err);
-  }
-}
-
-function connectNative() {
-  if (nativePort) return;
-
-  console.log("[pi-annotate] Connecting to native host...");
-  const port = chrome.runtime.connectNative("com.pi.annotate");
-  nativePort = port;
-  
-  port.onMessage.addListener((msg) => {
-    if (msg?.type === "PONG") {
-      lastNativeDisconnectError = "";
-      resolvePendingPing({ connected: true });
-      return;
-    }
-
-    console.log("[pi-annotate] From native host:", msg);
-    
-    chrome.tabs.query({ active: true, currentWindow: true }, (tabs) => {
-      if (!tabs[0]?.id) {
-        console.log("[pi-annotate] No active tab found");
-        const requestId = getRequestId(msg);
-        if (requestId) {
-          sendToNative({ type: "CANCEL", requestId, reason: "No active browser tab found" });
-        }
-        return;
-      }
-      
-      const requestId = getRequestId(msg);
-      const tabId = requestId && requestTabs.has(requestId) ? requestTabs.get(requestId) : tabs[0].id;
-      const currentUrl = tabs[0].url;
-      
-      if (msg.type === "START_ANNOTATION") {
-        const restricted = isRestrictedUrl(currentUrl);
-
-        if (msg.url && (restricted || currentUrl !== msg.url)) {
-          if (restricted) {
-            console.log("[pi-annotate] Opening new tab:", msg.url);
-            chrome.tabs.create({ url: msg.url }, (tab) => {
-              if (chrome.runtime.lastError) {
-                console.error("[pi-annotate] Failed to create tab:", chrome.runtime.lastError.message);
-                sendToNative({ type: "CANCEL", requestId, reason: chrome.runtime.lastError.message });
-                return;
-              }
-              injectAfterLoad(tab.id, msg, requestId);
-            });
-          } else {
-            console.log("[pi-annotate] Navigating to:", msg.url);
-            chrome.tabs.update(tabId, { url: msg.url }, (tab) => {
-              if (chrome.runtime.lastError) {
-                console.error("[pi-annotate] Failed to navigate:", chrome.runtime.lastError.message);
-                sendToNative({ type: "CANCEL", requestId, reason: chrome.runtime.lastError.message });
-                return;
-              }
-              injectAfterLoad(tab.id, msg, requestId);
-            });
-          }
-        } else if (restricted) {
-          console.log("[pi-annotate] Cannot annotate restricted tab:", currentUrl);
-          if (requestId) {
-            sendToNative({ type: "CANCEL", requestId, reason: "Current tab cannot be annotated (restricted URL). Provide a URL." });
-          }
-        } else {
-          console.log("[pi-annotate] Activating on current tab:", currentUrl);
-          if (requestId) requestTabs.set(requestId, tabId);
-          sendToContentScript(tabId, msg);
-        }
-      } else {
-        sendToContentScript(tabId, msg);
-      }
-    });
-  });
-  
-  port.onDisconnect.addListener(() => {
-    const error = chrome.runtime.lastError?.message || "Native host disconnected unexpectedly";
-    console.log("[pi-annotate] Native host disconnected", error);
-    lastNativeDisconnectError = error;
-    resolvePendingPing({ connected: false, error });
-    if (nativePort === port) {
-      nativePort = null;
-    }
-    setTimeout(connectNative, 2000);
-  });
-}
-
-// Handle messages from content script and popup
-chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
-  console.log("[pi-annotate] Message:", msg.type);
-  
-  if (msg.type === "CHECK_CONNECTION") {
-    pingNative().then(sendResponse);
-    return true;
-  }
-
-  if (msg.type === "TOGGLE_PICKER") {
-    togglePicker();
-    return;
-  }
-  
-  const requestId = getRequestId(msg);
-  
-  if (msg.type === "CAPTURE_SCREENSHOT") {
+function captureScreenshot(sender) {
+  return new Promise((resolve, reject) => {
     if (!sender.tab?.windowId) {
-      console.log("[pi-annotate] Screenshot failed: No window ID");
-      sendResponse({ error: "No window ID" });
-      return true;
+      reject(new Error("Cannot capture this browser window"));
+      return;
     }
     chrome.tabs.captureVisibleTab(sender.tab.windowId, { format: "png" }, (dataUrl) => {
       if (chrome.runtime.lastError) {
-        console.log("[pi-annotate] Screenshot error:", chrome.runtime.lastError.message);
-        sendResponse({ error: chrome.runtime.lastError.message });
+        reject(new Error(chrome.runtime.lastError.message));
+      } else if (!dataUrl) {
+        reject(new Error("Screenshot capture returned no image"));
       } else {
-        console.log("[pi-annotate] Screenshot captured, size:", dataUrl?.length || 0);
-        sendResponse({ dataUrl });
+        resolve({ dataUrl });
       }
     });
-    return true;
-  }
-  
-  if (["ANNOTATIONS_COMPLETE", "CANCEL"].includes(msg.type)) {
-    if (requestId) requestTabs.delete(requestId);
-    console.log("[pi-annotate] Forwarding to native host:", msg.type);
-    sendToNative(msg);
+  });
+}
+
+function runMessageTask(task, sendResponse) {
+  Promise.resolve()
+    .then(task)
+    .then(sendResponse)
+    .catch((error) => sendResponse({ error: publicError(error) }));
+  return true;
+}
+
+chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
+  switch (message?.type) {
+    case "GET_BROKER_CONFIG":
+      return runMessageTask(async () => {
+        const config = await getStoredConfig();
+        return {
+          endpoint: config.endpoint,
+          token: config.token,
+          selectedSessionId: config.selectedSessionId,
+        };
+      }, sendResponse);
+
+    case "SAVE_BROKER_CONFIG":
+      return runMessageTask(() => saveBrokerConfig(message), sendResponse);
+
+    case "LIST_SESSIONS":
+      return runMessageTask(listSessions, sendResponse);
+
+    case "SELECT_SESSION":
+      return runMessageTask(async () => {
+        const sessionId = validateSessionId(message.sessionId);
+        await chrome.storage.local.set({ selectedSessionId: sessionId });
+        return { selectedSessionId: sessionId };
+      }, sendResponse);
+
+    case "START_ANNOTATION":
+      return runMessageTask(() => startAnnotation(message.sessionId), sendResponse);
+
+    case "CAPTURE_SCREENSHOT":
+      return runMessageTask(() => captureScreenshot(sender), sendResponse);
+
+    case "ANNOTATIONS_COMPLETE":
+      return runMessageTask(() => deliverAnnotations(message), sendResponse);
+
+    case "CANCEL":
+      sendResponse({ cancelled: true });
+      return false;
+
+    default:
+      return false;
   }
 });
 
-// Handle keyboard shortcut
 chrome.commands.onCommand.addListener((command) => {
-  if (command === "toggle-picker") {
-    togglePicker();
-  }
+  if (command !== "toggle-picker") return;
+  startAnnotation().catch(() => {
+    // The popup provides actionable setup/session errors; keep shortcut failures quiet.
+  });
 });
-
-// Connect on startup
-connectNative();
-console.log("[pi-annotate] Background script loaded");

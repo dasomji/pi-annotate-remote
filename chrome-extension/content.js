@@ -70,9 +70,17 @@
   // ─────────────────────────────────────────────────────────────────────
   
   let isActive = false;
-  let requestId = null;
-  let multiSelectMode = false;
+  let sessionId = null;
+  let deliveryPending = false;
+  let multiSelectMode = true;
   let screenshotMode = "each"; // "each" | "full" | "none"
+  let panelMinimized = false;
+  let bubblePosition = null;
+  let bubbleDragState = null;
+  let bubbleWasDragged = false;
+  let escapeCount = 0;
+  let escapeResetTimer = null;
+  let abortDialogEl = null;
   
   // Element picker state
   let elementStack = [];
@@ -415,6 +423,41 @@
     }
     
     #pi-panel * { box-sizing: border-box; }
+
+    #pi-panel.pi-minimized {
+      left: auto;
+      right: 20px;
+      bottom: 20px;
+      width: 58px;
+      height: 58px;
+      padding: 0;
+      border: 1px solid var(--pi-border-muted);
+      border-radius: 50%;
+      box-shadow: 0 4px 24px var(--pi-shadow);
+      cursor: grab;
+      user-select: none;
+      touch-action: none;
+    }
+
+    #pi-panel.pi-minimized.dragging { cursor: grabbing; }
+    #pi-panel.pi-minimized > :not(.pi-minimized-bubble) { display: none; }
+
+    .pi-minimized-bubble {
+      display: none;
+      width: 100%;
+      height: 100%;
+      border-radius: 50%;
+      align-items: center;
+      justify-content: center;
+      flex-direction: column;
+      gap: 1px;
+      color: var(--pi-accent);
+      font-family: var(--pi-font-ui);
+    }
+
+    #pi-panel.pi-minimized .pi-minimized-bubble { display: flex; }
+    .pi-bubble-logo { font-size: 20px; font-weight: 700; line-height: 20px; }
+    .pi-bubble-count { color: var(--pi-fg-muted); font-size: 10px; line-height: 12px; }
     
     .pi-header {
       display: flex;
@@ -432,15 +475,18 @@
     }
     .pi-hint { color: var(--pi-fg-dim); font-size: 11px; margin-left: auto; }
     
+    .pi-minimize,
     .pi-close {
       background: none;
       border: none;
       color: var(--pi-fg-dim);
-      font-size: 18px;
       cursor: pointer;
       padding: 0 4px;
       line-height: 1;
     }
+    .pi-minimize { font-size: 16px; }
+    .pi-close { font-size: 18px; }
+    .pi-minimize:hover { color: var(--pi-accent); }
     .pi-close:hover { color: var(--pi-error); }
     
     .pi-toolbar {
@@ -625,12 +671,24 @@
     
     .pi-actions {
       display: flex;
-      justify-content: flex-end;
+      align-items: center;
+      justify-content: space-between;
+      gap: 12px;
       padding-top: 8px;
       border-top: 1px solid var(--pi-bg-elevated);
     }
+
+    .pi-delivery-error {
+      min-width: 0;
+      color: var(--pi-error);
+      font-size: 11px;
+      line-height: 1.35;
+      overflow-wrap: anywhere;
+    }
+
+    .pi-delivery-error[hidden] { display: none; }
     
-    .pi-buttons { display: flex; gap: 8px; }
+    .pi-buttons { display: flex; flex: none; gap: 8px; }
     
     .pi-btn {
       padding: 6px 14px;
@@ -655,9 +713,37 @@
       color: var(--pi-bg-body);
     }
     
-    .pi-btn-submit:hover { 
+    .pi-btn-submit:hover:not(:disabled) {
       background: var(--pi-accent-hover);
     }
+
+    .pi-btn:disabled { cursor: wait; opacity: 0.65; }
+
+    .pi-abort-backdrop {
+      position: fixed;
+      inset: 0;
+      z-index: ${Z_INDEX_TOOLTIP};
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      padding: 20px;
+      background: rgba(0, 0, 0, 0.55);
+      font-family: var(--pi-font-ui);
+    }
+
+    .pi-abort-dialog {
+      width: min(420px, calc(100vw - 40px));
+      padding: 20px;
+      border: 1px solid var(--pi-border-muted);
+      border-radius: 10px;
+      background: var(--pi-bg-card);
+      color: var(--pi-fg);
+      box-shadow: 0 12px 40px var(--pi-shadow);
+    }
+
+    .pi-abort-dialog h2 { margin: 0 0 8px; font-size: 17px; }
+    .pi-abort-dialog p { margin: 0 0 18px; color: var(--pi-fg-muted); font-size: 13px; line-height: 1.5; }
+    .pi-abort-actions { display: flex; justify-content: flex-end; gap: 8px; }
   `;
   
   // ─────────────────────────────────────────────────────────────────────
@@ -668,14 +754,8 @@
     console.log("[pi-annotate] Received:", msg.type);
     
     if (msg.type === "START_ANNOTATION") {
-      requestId = msg.requestId || msg.id || null;
+      sessionId = typeof msg.sessionId === "string" ? msg.sessionId : null;
       activate();
-    } else if (msg.type === "TOGGLE_PICKER") {
-      if (isActive) {
-        deactivate();
-      } else {
-        activate();
-      }
     } else if (msg.type === "CANCEL") {
       if (isActive) {
         deactivate();
@@ -724,6 +804,7 @@
   function resetState() {
     if (etchObserver) { etchObserver.disconnect(); etchObserver = null; }
 
+    deliveryPending = false;
     elementStack = [];
     stackIndex = 0;
     selectedElements = [];
@@ -732,8 +813,13 @@
     openNotes = new Set();
     notePositions = new Map();
     dragState = null;
-    multiSelectMode = false;
+    bubbleDragState = null;
+    bubbleWasDragged = false;
+    multiSelectMode = true;
     screenshotMode = "each";
+    setPanelMinimized(false);
+    resetEscapeSequence();
+    closeAbortDialog();
     debugMode = false;
     resetCSSVarCache();
     etchMode = false;
@@ -759,8 +845,8 @@
     const singleBtn = document.getElementById("pi-mode-single");
     const multiBtn = document.getElementById("pi-mode-multi");
     if (singleBtn && multiBtn) {
-      singleBtn.classList.add("active");
-      multiBtn.classList.remove("active");
+      singleBtn.classList.remove("active");
+      multiBtn.classList.add("active");
     }
     
     // Reset screenshot mode buttons
@@ -776,6 +862,7 @@
     // Clear context input
     const contextEl = document.getElementById("pi-context");
     if (contextEl) contextEl.value = "";
+    setDeliveryState(false);
     
     // Reset debug mode checkbox
     const debugCheckbox = document.getElementById("pi-debug-mode");
@@ -787,8 +874,7 @@
     if (etchToggle) etchToggle.classList.remove("recording");
     
     // Update count
-    const countEl = document.getElementById("pi-count");
-    if (countEl) countEl.textContent = "0 selected";
+    updateSelectionCount();
     
     console.log("[pi-annotate] State reset for new session");
   }
@@ -809,6 +895,8 @@
 
     if (etchObserver) { etchObserver.disconnect(); etchObserver = null; }
     clearEtchMarkers();
+    resetEscapeSequence();
+    closeAbortDialog();
 
     styleEl?.remove();
     highlightEl?.remove();
@@ -828,9 +916,13 @@
     openNotes = new Set();
     notePositions = new Map();
     dragState = null;
-    requestId = null;
-    multiSelectMode = false;
+    bubbleDragState = null;
+    bubbleWasDragged = false;
+    sessionId = null;
+    deliveryPending = false;
+    multiSelectMode = true;
     screenshotMode = "each";
+    panelMinimized = false;
     debugMode = false;
     resetCSSVarCache();
     etchMode = false;
@@ -884,15 +976,20 @@
     panelEl = document.createElement("div");
     panelEl.id = "pi-panel";
     panelEl.innerHTML = `
+      <div class="pi-minimized-bubble" id="pi-minimized-bubble" role="button" tabindex="0" aria-label="Restore annotation bar">
+        <span class="pi-bubble-logo">π</span>
+        <span class="pi-bubble-count" id="pi-bubble-count">0</span>
+      </div>
       <div class="pi-header">
         <span class="pi-logo">π Annotate</span>
-        <span class="pi-hint">Click elements • ${ALT_KEY_LABEL}+scroll cycles parents • ESC to close</span>
-        <button class="pi-close" id="pi-close" title="Close (ESC)">×</button>
+        <span class="pi-hint">Click elements • ${ALT_KEY_LABEL}+scroll cycles parents • ESC ×3 to abort</span>
+        <button class="pi-minimize" id="pi-minimize" title="Minimize annotation bar" aria-label="Minimize annotation bar">−</button>
+        <button class="pi-close" id="pi-close" title="Cancel annotation" aria-label="Cancel annotation">×</button>
       </div>
       <div class="pi-toolbar">
         <div class="pi-mode-toggle">
-          <button class="pi-mode-btn active" id="pi-mode-single" title="Click replaces selection">Single</button>
-          <button class="pi-mode-btn" id="pi-mode-multi" title="Click adds to selection">Multi</button>
+          <button class="pi-mode-btn" id="pi-mode-single" title="Click replaces selection">Single</button>
+          <button class="pi-mode-btn active" id="pi-mode-multi" title="Click adds to selection">Multi</button>
         </div>
         <div class="pi-screenshot-toggle">
           <span class="pi-toggle-label">Screenshot</span>
@@ -920,6 +1017,7 @@
         <input type="text" id="pi-context" placeholder="General context (optional)..." />
       </div>
       <div class="pi-actions">
+        <div class="pi-delivery-error" id="pi-delivery-error" role="alert" aria-live="assertive" hidden></div>
         <div class="pi-buttons">
           <button class="pi-btn pi-btn-cancel" id="pi-cancel">Cancel</button>
           <button class="pi-btn pi-btn-submit" id="pi-submit">Submit</button>
@@ -931,6 +1029,23 @@
     document.getElementById("pi-close").addEventListener("click", handleCancel);
     document.getElementById("pi-cancel").addEventListener("click", handleCancel);
     document.getElementById("pi-submit").addEventListener("click", handleSubmit);
+    document.getElementById("pi-minimize").addEventListener("click", () => setPanelMinimized(true));
+
+    const minimizedBubble = document.getElementById("pi-minimized-bubble");
+    minimizedBubble.addEventListener("mousedown", startBubbleDrag);
+    minimizedBubble.addEventListener("click", () => {
+      if (bubbleWasDragged) {
+        bubbleWasDragged = false;
+        return;
+      }
+      setPanelMinimized(false);
+    });
+    minimizedBubble.addEventListener("keydown", (event) => {
+      if (event.key === "Enter" || event.key === " ") {
+        event.preventDefault();
+        setPanelMinimized(false);
+      }
+    });
     
     // Mode toggle
     document.getElementById("pi-mode-single").addEventListener("click", () => setMultiMode(false));
@@ -970,13 +1085,63 @@
     panelEl.addEventListener("mousemove", e => e.stopPropagation(), true);
     panelEl.addEventListener("click", e => {
       const target = e.target;
-      if (target.tagName === "BUTTON" || target.tagName === "INPUT" || target.tagName === "TEXTAREA") {
+      if (
+        target.closest?.("#pi-minimized-bubble") ||
+        target.tagName === "BUTTON" ||
+        target.tagName === "INPUT" ||
+        target.tagName === "TEXTAREA"
+      ) {
         return;
       }
       e.stopPropagation();
     }, true);
   }
   
+  function getPanelReservedHeight() {
+    if (!panelEl || panelMinimized) return 0;
+    return panelEl.offsetHeight || 96;
+  }
+
+  function setPanelMinimized(minimized) {
+    panelMinimized = minimized;
+    if (!panelEl) return;
+
+    panelEl.classList.toggle("pi-minimized", minimized);
+    panelEl.classList.remove("dragging");
+    bubbleDragState = null;
+
+    if (minimized) {
+      if (bubblePosition) {
+        panelEl.style.left = `${bubblePosition.x}px`;
+        panelEl.style.top = `${bubblePosition.y}px`;
+        panelEl.style.right = "auto";
+        panelEl.style.bottom = "auto";
+      }
+    } else {
+      panelEl.style.left = "";
+      panelEl.style.top = "";
+      panelEl.style.right = "";
+      panelEl.style.bottom = "";
+    }
+
+    handleResize();
+    updateConnectors();
+  }
+
+  function startBubbleDrag(event) {
+    if (!panelMinimized || !panelEl || event.button !== 0) return;
+    const rect = panelEl.getBoundingClientRect();
+    bubbleWasDragged = false;
+    bubbleDragState = {
+      startX: event.clientX,
+      startY: event.clientY,
+      startLeft: rect.left,
+      startTop: rect.top,
+    };
+    panelEl.classList.add("dragging");
+    event.preventDefault();
+  }
+
   function setMultiMode(isMulti) {
     multiSelectMode = isMulti;
     const singleBtn = document.getElementById("pi-mode-single");
@@ -1007,7 +1172,7 @@
     const rect = element.getBoundingClientRect();
     const vw = window.innerWidth;
     const vh = window.innerHeight;
-    const panelHeight = document.getElementById("pi-panel")?.offsetHeight || 96;
+    const panelHeight = getPanelReservedHeight();
     const margin = 16;
     
     // Try right side first
@@ -1071,7 +1236,7 @@
     // Clamp to viewport
     const vw = window.innerWidth;
     const vh = window.innerHeight;
-    const panelHeight = document.getElementById("pi-panel")?.offsetHeight || 96;
+    const panelHeight = getPanelReservedHeight();
     adjusted.x = Math.max(16, Math.min(adjusted.x, vw - cardSize.width - 16));
     adjusted.y = Math.max(16, Math.min(adjusted.y, vh - cardSize.height - panelHeight - 16));
     
@@ -1194,16 +1359,34 @@
   // ─────────────────────────────────────────────────────────────────────
   
   function initDragHandlers() {
-    document.addEventListener("mousemove", handleDragMove);
-    document.addEventListener("mouseup", handleDragEnd);
+    document.addEventListener("mousemove", handleDragMove, true);
+    document.addEventListener("mouseup", handleDragEnd, true);
   }
   
   function cleanupDragHandlers() {
-    document.removeEventListener("mousemove", handleDragMove);
-    document.removeEventListener("mouseup", handleDragEnd);
+    document.removeEventListener("mousemove", handleDragMove, true);
+    document.removeEventListener("mouseup", handleDragEnd, true);
   }
   
   function handleDragMove(e) {
+    if (bubbleDragState && panelEl) {
+      const { startX, startY, startLeft, startTop } = bubbleDragState;
+      const dx = e.clientX - startX;
+      const dy = e.clientY - startY;
+      if (Math.abs(dx) > 3 || Math.abs(dy) > 3) bubbleWasDragged = true;
+
+      const width = panelEl.offsetWidth || 58;
+      const height = panelEl.offsetHeight || 58;
+      const newX = Math.max(8, Math.min(startLeft + dx, window.innerWidth - width - 8));
+      const newY = Math.max(8, Math.min(startTop + dy, window.innerHeight - height - 8));
+      panelEl.style.left = `${newX}px`;
+      panelEl.style.top = `${newY}px`;
+      panelEl.style.right = "auto";
+      panelEl.style.bottom = "auto";
+      bubblePosition = { x: newX, y: newY };
+      return;
+    }
+
     if (!dragState) return;
     const { card, startX, startY, startLeft, startTop } = dragState;
     const dx = e.clientX - startX;
@@ -1218,6 +1401,10 @@
   }
   
   function handleDragEnd() {
+    if (bubbleDragState) {
+      panelEl?.classList.remove("dragging");
+      bubbleDragState = null;
+    }
     if (dragState) {
       dragState.card.classList.remove("dragging");
       dragState = null;
@@ -1391,6 +1578,13 @@
   // UI Updates
   // ─────────────────────────────────────────────────────────────────────
   
+  function updateSelectionCount() {
+    const countEl = document.getElementById("pi-count");
+    if (countEl) countEl.textContent = `${selectedElements.length} selected`;
+    const bubbleCountEl = document.getElementById("pi-bubble-count");
+    if (bubbleCountEl) bubbleCountEl.textContent = String(selectedElements.length);
+  }
+
   function updateBadges() {
     if (!markersContainer) return;
     markersContainer.innerHTML = "";
@@ -1425,9 +1619,7 @@
       markersContainer.appendChild(badge);
     });
     
-    // Update count
-    const countEl = document.getElementById("pi-count");
-    if (countEl) countEl.textContent = `${selectedElements.length} selected`;
+    updateSelectionCount();
   }
   
   function updateConnectors() {
@@ -1619,11 +1811,96 @@
     updateConnectors();
   }
   
+  function resetEscapeSequence() {
+    escapeCount = 0;
+    if (escapeResetTimer) {
+      clearTimeout(escapeResetTimer);
+      escapeResetTimer = null;
+    }
+  }
+
+  function closeAbortDialog() {
+    abortDialogEl?.remove();
+    abortDialogEl = null;
+  }
+
+  function showAbortDialog() {
+    if (abortDialogEl) return;
+
+    abortDialogEl = document.createElement("div");
+    abortDialogEl.className = "pi-abort-backdrop";
+    abortDialogEl.innerHTML = `
+      <div class="pi-abort-dialog" role="dialog" aria-modal="true" aria-labelledby="pi-abort-title" aria-describedby="pi-abort-description">
+        <h2 id="pi-abort-title">Abort annotation?</h2>
+        <p id="pi-abort-description">Your selected elements and comments will be discarded.</p>
+        <div class="pi-abort-actions">
+          <button class="pi-btn pi-btn-cancel" id="pi-abort-continue">Continue annotating</button>
+          <button class="pi-btn pi-btn-submit" id="pi-abort-confirm">Abort annotation</button>
+        </div>
+      </div>
+    `;
+    document.body.appendChild(abortDialogEl);
+
+    const continueButton = abortDialogEl.querySelector("#pi-abort-continue");
+    const abortButton = abortDialogEl.querySelector("#pi-abort-confirm");
+    continueButton.addEventListener("click", closeAbortDialog);
+    abortButton.addEventListener("click", () => {
+      closeAbortDialog();
+      handleCancel();
+    });
+    abortDialogEl.addEventListener("click", (event) => {
+      if (event.target === abortDialogEl) closeAbortDialog();
+    });
+    continueButton.focus();
+  }
+
   function onKeyDown(e) {
     if (!isActive) return;
-    if (e.key === "Escape") {
-      e.preventDefault();
-      handleCancel();
+
+    if (abortDialogEl) {
+      if (e.key === "Escape") {
+        e.preventDefault();
+        e.stopImmediatePropagation();
+        if (!e.repeat) {
+          closeAbortDialog();
+          resetEscapeSequence();
+        }
+        return;
+      }
+
+      if (e.key === "Tab") {
+        const buttons = Array.from(abortDialogEl.querySelectorAll("button"));
+        const currentIndex = buttons.indexOf(document.activeElement);
+        const nextIndex = e.shiftKey
+          ? (currentIndex <= 0 ? buttons.length - 1 : currentIndex - 1)
+          : (currentIndex >= buttons.length - 1 ? 0 : currentIndex + 1);
+        e.preventDefault();
+        buttons[nextIndex]?.focus();
+      }
+      return;
+    }
+
+    if (e.key !== "Escape") {
+      resetEscapeSequence();
+      return;
+    }
+
+    e.preventDefault();
+    e.stopImmediatePropagation();
+    if (e.repeat) return;
+
+    const activeElement = document.activeElement;
+    if (activeElement?.matches?.(".pi-note-textarea, #pi-context")) {
+      activeElement.blur();
+    }
+
+    escapeCount += 1;
+    if (escapeResetTimer) clearTimeout(escapeResetTimer);
+    escapeResetTimer = setTimeout(resetEscapeSequence, 2000);
+
+    if (escapeCount >= 3) {
+      resetEscapeSequence();
+      showAbortDialog();
     }
   }
   
@@ -1634,8 +1911,19 @@
   
   function handleResize() {
     updateBadges();
-    const panelHeight = document.getElementById("pi-panel")?.offsetHeight || 96;
-    
+    const panelHeight = getPanelReservedHeight();
+
+    if (panelMinimized && panelEl && bubblePosition) {
+      const width = panelEl.offsetWidth || 58;
+      const height = panelEl.offsetHeight || 58;
+      bubblePosition = {
+        x: Math.max(8, Math.min(bubblePosition.x, window.innerWidth - width - 8)),
+        y: Math.max(8, Math.min(bubblePosition.y, window.innerHeight - height - 8)),
+      };
+      panelEl.style.left = `${bubblePosition.x}px`;
+      panelEl.style.top = `${bubblePosition.y}px`;
+    }
+
     openNotes.forEach(index => {
       const card = notesContainer.querySelector(`[data-index="${index}"]`);
       if (!card) return;
@@ -2919,8 +3207,51 @@
   // ─────────────────────────────────────────────────────────────────────
   // Submit / Cancel
   // ─────────────────────────────────────────────────────────────────────
+
+  function setDeliveryState(pending, error = "") {
+    deliveryPending = pending;
+    const submitButton = document.getElementById("pi-submit");
+    const cancelButton = document.getElementById("pi-cancel");
+    const closeButton = document.getElementById("pi-close");
+    const errorElement = document.getElementById("pi-delivery-error");
+
+    if (submitButton) {
+      submitButton.disabled = pending;
+      submitButton.textContent = pending ? "Sending…" : (error ? "Retry" : "Submit");
+    }
+    if (cancelButton) cancelButton.disabled = pending;
+    if (closeButton) closeButton.disabled = pending;
+    if (errorElement) {
+      errorElement.textContent = error;
+      errorElement.hidden = !error;
+    }
+  }
+
+  function hideAnnotationUiForCapture() {
+    hideHighlight();
+    hideTooltip();
+    const elements = [markersContainer, notesContainer, connectorsEl, panelEl].filter(Boolean);
+    const previousDisplays = elements.map((element) => [element, element.style.display]);
+    for (const element of elements) element.style.display = "none";
+    clearEtchMarkers();
+
+    return () => {
+      if (!isActive) return;
+      for (const [element, display] of previousDisplays) {
+        if (element.isConnected) element.style.display = display;
+      }
+    };
+  }
   
   async function handleSubmit() {
+    if (deliveryPending) return;
+    if (!sessionId) {
+      setDeliveryState(false, "No Pi annotation session is selected. Start again from the extension popup.");
+      return;
+    }
+
+    const targetSessionId = sessionId;
+    setDeliveryState(true);
     const context = document.getElementById("pi-context")?.value?.trim() || "";
     
     // Re-capture debug data for all elements if debug mode is on at submit time
@@ -2944,14 +3275,9 @@
       };
     });
     
-    // Hide UI for screenshot capture
-    hideHighlight();
-    hideTooltip();
-    if (markersContainer) markersContainer.style.display = "none";
-    if (notesContainer) notesContainer.style.display = "none";
-    if (connectorsEl) connectorsEl.style.display = "none";
-    if (panelEl) panelEl.style.display = "none";
-    clearEtchMarkers();
+    // Hide UI for screenshot capture. Keep the prior display state so a
+    // delivery failure can restore the annotation instead of discarding it.
+    const restoreAnnotationUi = hideAnnotationUiForCapture();
     
     await new Promise(r => requestAnimationFrame(() => requestAnimationFrame(r)));
     
@@ -3026,32 +3352,41 @@
       }
     }
     
-    chrome.runtime.sendMessage({
-      type: "ANNOTATIONS_COMPLETE",
-      requestId,
-      result: {
-        success: true,
-        elements,
-        screenshot,
-        screenshots,
-        prompt: context,
-        url: window.location.href,
-        viewport: { width: window.innerWidth, height: window.innerHeight },
-        editCapture,
-      },
-    });
-    
-    deactivate();
+    try {
+      const response = await chrome.runtime.sendMessage({
+        type: "ANNOTATIONS_COMPLETE",
+        sessionId: targetSessionId,
+        result: {
+          success: true,
+          elements,
+          screenshot,
+          screenshots,
+          prompt: context,
+          url: window.location.href,
+          viewport: { width: window.innerWidth, height: window.innerHeight },
+          editCapture,
+        },
+      });
+      if (!response?.delivered) {
+        throw new Error(response?.error || "The broker did not acknowledge delivery");
+      }
+      deactivate();
+    } catch (error) {
+      restoreAnnotationUi();
+      const message = error instanceof Error ? error.message : String(error);
+      setDeliveryState(false, `Delivery failed: ${message.slice(0, 240)}`);
+    }
   }
   
   function handleCancel() {
-    const id = requestId;
+    if (deliveryPending) return;
+    const targetSessionId = sessionId;
     deactivate();
     
     try {
       chrome.runtime.sendMessage({
         type: "CANCEL",
-        requestId: id,
+        sessionId: targetSessionId,
         reason: "user",
       });
     } catch (e) {
