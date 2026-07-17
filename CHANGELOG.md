@@ -9,6 +9,7 @@ All notable changes to Pi Annotate.
 - `/annotate` now makes the current Pi session available to the browser instead of opening a URL and waiting for one tool request. Browser submissions arrive as acknowledged user messages in the selected session.
 
 ### Added
+- Busy Pi sessions now accept browser annotations into Pi's native follow-up queue, allowing multiple annotations to be submitted without waiting for the current agent run to finish.
 - Conflict-safe automatic Tailscale Serve setup on the broker port, with verified MagicDNS endpoint discovery, idempotent route reuse, bounded warnings, and `PI_ANNOTATE_TAILSCALE=off` as an opt-out.
 - Shared detached localhost broker with bearer authentication, private XDG-aware state, bounded requests, local IPC session registration, reconnects, exact opaque-session routing, delivery acknowledgements, and timeouts.
 - `/annotate on`, `/annotate off`, `/annotate status`, and `/annotate setup` lifecycle controls.

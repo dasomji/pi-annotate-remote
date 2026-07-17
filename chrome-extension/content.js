@@ -1020,7 +1020,7 @@
         <div class="pi-delivery-error" id="pi-delivery-error" role="alert" aria-live="assertive" hidden></div>
         <div class="pi-buttons">
           <button class="pi-btn pi-btn-cancel" id="pi-cancel">Cancel</button>
-          <button class="pi-btn pi-btn-submit" id="pi-submit">Submit</button>
+          <button class="pi-btn pi-btn-submit" id="pi-submit" title="If Pi is busy, this annotation is queued as a follow-up">Submit</button>
         </div>
       </div>
     `;

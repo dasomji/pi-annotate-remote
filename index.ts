@@ -15,11 +15,25 @@ const MAX_SCREENSHOT_BYTES = 15 * 1024 * 1024;
 
 type AnnotationContext = {
   hasUI?: boolean;
+  isIdle?: () => boolean;
   ui?: {
     notify?: (message: string, level: "info" | "error") => void;
     setStatus?: (source: string, message: string) => void;
   };
 };
+
+export function sendAnnotationToPi(
+  pi: Pick<ExtensionAPI, "sendUserMessage">,
+  content: string,
+  ctx: Pick<AnnotationContext, "isIdle">,
+): "queued" | "delivered" {
+  const disposition = ctx.isIdle?.() === false ? "queued" : "delivered";
+  // `followUp` is processed immediately while idle and queued after all current
+  // tools and automatic continuations while busy. Passing it unconditionally
+  // also closes the race between checking isIdle() and sending the message.
+  pi.sendUserMessage(content, { deliverAs: "followUp" });
+  return disposition;
+}
 
 type TailscaleServeInfo = {
   endpoint: string | null;
@@ -118,8 +132,8 @@ export default function (pi: ExtensionAPI) {
         onAnnotation: async (value: unknown) => {
           if (!isAnnotationResult(value)) throw new Error("Annotation payload is invalid");
           const text = await formatResult(value);
-          pi.sendUserMessage(text);
-          setStatus("Annotation delivered");
+          const disposition = sendAnnotationToPi(pi, text, currentCtx || {});
+          setStatus(disposition === "queued" ? "Annotation queued as follow-up" : "Annotation delivered");
         },
       });
     }

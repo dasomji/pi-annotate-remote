@@ -97,6 +97,8 @@ The extension requests optional network access only for the configured host. `ht
 
 The `annotate` tool uses the same availability flow when Pi decides visual feedback is useful. Browser submissions arrive later as a user message in the selected Pi session; the tool does not hold an agent turn open while you annotate.
 
+If Pi is already working when you submit, the annotation is accepted immediately and added to Pi's native follow-up queue. It runs after the current tools, retries, compaction, and other automatic continuations finish. You can start and submit more annotations without waiting; Pi preserves their follow-up order. This is runtime-idle ordering rather than a guess about whether the broader human task is conceptually complete.
+
 A session remains available until `/annotate off`, Pi exits, or its broker connection is lost. Multiple Pi sessions can be available simultaneously, labelled with project directory and Git branch.
 
 ## Browser controls
