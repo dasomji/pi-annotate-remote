@@ -536,13 +536,19 @@ async function openShortcutSettings() {
 
 async function sendToContentScript(tabId, message) {
   try {
-    await chrome.tabs.sendMessage(tabId, message);
+    const response = await chrome.tabs.sendMessage(tabId, message);
+    if (response?.started === true) return;
   } catch {
-    await chrome.scripting.executeScript({
-      target: { tabId },
-      files: ["content.js"],
-    });
-    await chrome.tabs.sendMessage(tabId, message);
+    // No annotator content script has acknowledged this message yet.
+  }
+
+  await chrome.scripting.executeScript({
+    target: { tabId },
+    files: ["content.js"],
+  });
+  const response = await chrome.tabs.sendMessage(tabId, message);
+  if (response?.started !== true) {
+    throw new Error("Pi Annotate could not start on this page");
   }
 }
 

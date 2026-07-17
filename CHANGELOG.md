@@ -34,6 +34,9 @@ All notable changes to Pi Annotate.
 - Broker host permission is optional and requested for only the configured hostname. Remote brokers require HTTPS; localhost HTTP remains available for development.
 - Pi sessions are labelled with project directory and Git branch while routing uses a random opaque ID.
 
+### Fixed
+- Required an explicit annotator acknowledgement before treating **Start annotation** as handled, preventing the in-page session chooser from closing without opening the annotation bar.
+
 ### Security
 - Kept long-lived bearer tokens out of pairing URLs by placing only one-time codes in fragments that are never sent in the initial HTTP request.
 - Restricted pairing exchange to the pinned extension origin and derived the broker endpoint from the browser-provided sender URL rather than external message data.

@@ -763,6 +763,7 @@
     if (msg.type === "START_ANNOTATION") {
       sessionId = typeof msg.sessionId === "string" ? msg.sessionId : null;
       activate();
+      sendResponse({ started: true });
     } else if (msg.type === "CANCEL") {
       if (isActive) {
         deactivate();

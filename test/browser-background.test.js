@@ -139,6 +139,9 @@ function createHarness({
         }
         tabMessages.push(JSON.parse(JSON.stringify({ tabId, message })));
         if (message?.type === "OPEN_PICKER") return { opened: true };
+        if (message?.type === "START_ANNOTATION" && injected.some((entry) => entry.files?.includes("content.js"))) {
+          return { started: true };
+        }
         return undefined;
       },
       captureVisibleTab(_windowId, _options, callback) {
@@ -457,6 +460,20 @@ test("shortcut settings open in the normal browser window", async () => {
     active: true,
   });
   assert.deepEqual(harness.windowUpdates.at(-1), { windowId: 3, focused: true });
+});
+
+test("starting annotation injects the annotator when only the chooser handles tab messages", async () => {
+  const harness = createHarness();
+  await configure(harness);
+  await harness.triggerAction();
+
+  const response = await harness.send({
+    type: "START_ANNOTATION",
+    sessionId: "session_abcdefghijkl",
+  });
+
+  assert.deepEqual(response, { started: true, baseOrigin: "https://example.test" });
+  assert.deepEqual(harness.injected, [{ target: { tabId: 7 }, files: ["content.js"] }]);
 });
 
 test("starting annotation targets the remembered page and records its origin recommendation", async () => {

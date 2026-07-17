@@ -144,7 +144,13 @@ test("annotation bar is a floating rounded panel with a multiline context field"
 
 test("content UI stays open with Retry until broker delivery is acknowledged", async () => {
   const harness = createHarness();
-  harness.runtimeListener({ type: "START_ANNOTATION", sessionId: "session_abcdefghijkl" }, {}, () => {});
+  let startResponse;
+  harness.runtimeListener(
+    { type: "START_ANNOTATION", sessionId: "session_abcdefghijkl" },
+    {},
+    (response) => { startResponse = response; },
+  );
+  assert.equal(startResponse?.started, true);
 
   const submit = harness.ids.get("pi-submit");
   const error = harness.ids.get("pi-delivery-error");
