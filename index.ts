@@ -429,7 +429,7 @@ export default function (pi: ExtensionAPI) {
     const timestamp = Date.now();
     
     if (result.screenshot) {
-      // Full page screenshot
+      // Visible viewport screenshot
       try {
         if (!result.screenshot.startsWith("data:image/")) throw new Error("Invalid screenshot data");
         const screenshotPath = path.join(os.tmpdir(), `pi-annotate-${timestamp}-full.png`);
@@ -437,7 +437,7 @@ export default function (pi: ExtensionAPI) {
         const buffer = Buffer.from(base64Data, "base64");
         if (buffer.length > MAX_SCREENSHOT_BYTES) throw new Error("Screenshot too large");
         await fs.promises.writeFile(screenshotPath, buffer);
-        output += `**Screenshot (full page):** ${screenshotPath}\n`;
+        output += `**Screenshot (visible viewport):** ${screenshotPath}\n`;
       } catch (err) {
         output += `*Screenshot capture failed: ${err}*\n`;
       }

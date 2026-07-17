@@ -1,19 +1,26 @@
 /**
  * Pi Annotate - Background Service Worker
  *
- * Owns broker credentials and all broker network requests. Popup and content
- * scripts communicate with the broker only through runtime messages.
+ * Owns the centered picker window, broker credentials, recommendations, and
+ * network requests. Picker and content scripts use runtime messages.
  */
 
 const STORAGE_KEYS = ["brokerEndpoint", "brokerToken", "selectedSessionId"];
+const RECOMMENDATIONS_KEY = "sessionRecommendationsByOrigin";
+const PICKER_STATE_KEY = "pickerState";
 const BROKER_TIMEOUT_MS = 20_000;
 const MAX_ERROR_LENGTH = 300;
 const MAX_SESSION_COUNT = 1_000;
+const MAX_RECOMMENDATIONS = 100;
+const PICKER_WIDTH = 460;
+const PICKER_HEIGHT = 640;
 const PAIRING_CODE_PATTERN = /^[A-Za-z0-9_-]{43}$/;
+let pickerStateFallback = {};
 
-// Keep the bearer token out of content-script contexts. Popup and service
-// worker pages remain trusted extension contexts and can still use local storage.
+// Keep the bearer token and picker state out of content-script contexts. Picker,
+// pairing, and service-worker pages remain trusted extension contexts.
 chrome.storage.local.setAccessLevel({ accessLevel: "TRUSTED_CONTEXTS" }).catch(() => {});
+chrome.storage.session?.setAccessLevel({ accessLevel: "TRUSTED_CONTEXTS" }).catch(() => {});
 
 function boundedMessage(value, fallback = "Broker request failed") {
   const message = typeof value === "string" && value.trim() ? value.trim() : fallback;
@@ -71,6 +78,72 @@ function validateSessionId(value) {
     throw new Error("Select a valid annotation session");
   }
   return value;
+}
+
+function pageOrigin(value) {
+  if (typeof value !== "string") return "";
+  try {
+    const url = new URL(value);
+    if (!["http:", "https:"].includes(url.protocol)) return "";
+    return url.origin;
+  } catch {
+    return "";
+  }
+}
+
+async function getPickerState() {
+  if (!chrome.storage.session) return { ...pickerStateFallback };
+  const stored = await chrome.storage.session.get([PICKER_STATE_KEY]);
+  const state = stored[PICKER_STATE_KEY];
+  return state && typeof state === "object" && !Array.isArray(state) ? state : {};
+}
+
+async function updatePickerState(values) {
+  const state = { ...(await getPickerState()), ...values };
+  pickerStateFallback = state;
+  if (chrome.storage.session) {
+    await chrome.storage.session.set({ [PICKER_STATE_KEY]: state });
+  }
+  return state;
+}
+
+function sanitizeRecommendations(value) {
+  if (!value || typeof value !== "object" || Array.isArray(value)) return {};
+  const entries = [];
+  for (const [origin, recommendation] of Object.entries(value)) {
+    if (pageOrigin(origin) !== origin || !recommendation || typeof recommendation !== "object") continue;
+    try {
+      const sessionId = validateSessionId(recommendation.sessionId);
+      const updatedAt = Number.isFinite(recommendation.updatedAt) ? recommendation.updatedAt : 0;
+      entries.push([origin, { sessionId, updatedAt }]);
+    } catch {
+      // Ignore stale or malformed browser storage.
+    }
+  }
+  return Object.fromEntries(entries.sort((a, b) => b[1].updatedAt - a[1].updatedAt).slice(0, MAX_RECOMMENDATIONS));
+}
+
+async function recommendedSessionForOrigin(origin, sessions) {
+  if (!origin) return "";
+  const stored = await chrome.storage.local.get([RECOMMENDATIONS_KEY]);
+  const recommendation = sanitizeRecommendations(stored[RECOMMENDATIONS_KEY])[origin];
+  return recommendation && sessions.some((session) => session.id === recommendation.sessionId)
+    ? recommendation.sessionId
+    : "";
+}
+
+async function rememberSessionForOrigin(origin, sessionId) {
+  if (!origin) return;
+  validateSessionId(sessionId);
+  const stored = await chrome.storage.local.get([RECOMMENDATIONS_KEY]);
+  const recommendations = sanitizeRecommendations(stored[RECOMMENDATIONS_KEY]);
+  recommendations[origin] = { sessionId, updatedAt: Date.now() };
+  const bounded = Object.fromEntries(
+    Object.entries(recommendations)
+      .sort((a, b) => b[1].updatedAt - a[1].updatedAt)
+      .slice(0, MAX_RECOMMENDATIONS),
+  );
+  await chrome.storage.local.set({ [RECOMMENDATIONS_KEY]: bounded });
 }
 
 async function getStoredConfig({ requireComplete = false } = {}) {
@@ -245,20 +318,157 @@ async function listSessions() {
   const body = await brokerRequest("/v1/sessions");
   const sessions = sanitizeSessions(body);
   const config = await getStoredConfig();
+  const pickerState = await getPickerState();
+  const baseOrigin = pageOrigin(pickerState.baseOrigin);
   const selectedSessionId = sessions.some((session) => session.id === config.selectedSessionId)
     ? config.selectedSessionId
     : "";
+  const recommendedSessionId = await recommendedSessionForOrigin(baseOrigin, sessions);
 
   if (selectedSessionId !== config.selectedSessionId) {
     await chrome.storage.local.set({ selectedSessionId });
   }
 
-  return { sessions, selectedSessionId };
+  return { sessions, selectedSessionId, recommendedSessionId, baseOrigin };
 }
 
 function isRestrictedUrl(url) {
   if (!url) return true;
   return /^(chrome|chrome-extension|edge|about|devtools|view-source):/i.test(url);
+}
+
+async function getLastFocusedNormalWindow() {
+  try {
+    return await chrome.windows.getLastFocused({ populate: true, windowTypes: ["normal"] });
+  } catch {
+    return null;
+  }
+}
+
+function activeTabInWindow(window) {
+  return Array.isArray(window?.tabs) ? window.tabs.find((tab) => tab.active) || null : null;
+}
+
+async function queryActiveTab(windowId) {
+  const query = Number.isInteger(windowId)
+    ? { active: true, windowId }
+    : { active: true, lastFocusedWindow: true };
+  const [tab] = await chrome.tabs.query(query);
+  return tab || null;
+}
+
+async function resolveTargetTab(tabHint) {
+  if (tabHint?.id && !isRestrictedUrl(tabHint.url)) return tabHint;
+
+  const pickerState = await getPickerState();
+  if (Number.isInteger(pickerState.targetTabId)) {
+    try {
+      const tab = await chrome.tabs.get(pickerState.targetTabId);
+      if (tab?.id && !isRestrictedUrl(tab.url)) return tab;
+    } catch {
+      // The remembered target tab was closed; fall back to the active normal window.
+    }
+  }
+
+  const normalWindow = await getLastFocusedNormalWindow();
+  const tab = activeTabInWindow(normalWindow) || await queryActiveTab(normalWindow?.id);
+  if (!tab?.id || isRestrictedUrl(tab.url)) {
+    throw new Error("Open a regular web page before starting annotation");
+  }
+  return tab;
+}
+
+async function notifyPickerContextChanged() {
+  try {
+    await chrome.runtime.sendMessage({ type: "PICKER_CONTEXT_UPDATED" });
+  } catch {
+    // No picker page is listening yet.
+  }
+}
+
+async function openPickerWindow(tabHint) {
+  const normalWindow = await getLastFocusedNormalWindow();
+  let targetTab = tabHint?.id ? tabHint : activeTabInWindow(normalWindow);
+  if (!targetTab && normalWindow?.id) targetTab = await queryActiveTab(normalWindow.id);
+
+  const state = await updatePickerState({
+    targetTabId: targetTab?.id || null,
+    targetWindowId: targetTab?.windowId || normalWindow?.id || null,
+    baseOrigin: pageOrigin(targetTab?.url),
+  });
+  const popupUrl = chrome.runtime.getURL("popup.html");
+
+  if (Number.isInteger(state.windowId) && Number.isInteger(state.pickerTabId)) {
+    try {
+      const existing = await chrome.windows.get(state.windowId, { populate: true });
+      const isPicker = existing?.type === "popup" &&
+        existing.tabs?.some((tab) => tab.id === state.pickerTabId);
+      if (isPicker) {
+        await chrome.windows.update(state.windowId, { focused: true });
+        await notifyPickerContextChanged();
+        return { windowId: state.windowId, reused: true };
+      }
+    } catch {
+      // Stale window IDs are expected after the picker is closed.
+    }
+  }
+
+  const createOptions = {
+    type: "popup",
+    url: popupUrl,
+    focused: true,
+    width: PICKER_WIDTH,
+    height: PICKER_HEIGHT,
+  };
+  if (
+    Number.isFinite(normalWindow?.left) && Number.isFinite(normalWindow?.top) &&
+    Number.isFinite(normalWindow?.width) && Number.isFinite(normalWindow?.height)
+  ) {
+    createOptions.left = Math.round(normalWindow.left + (normalWindow.width - PICKER_WIDTH) / 2);
+    createOptions.top = Math.round(normalWindow.top + (normalWindow.height - PICKER_HEIGHT) / 2);
+  }
+
+  let created;
+  try {
+    created = await chrome.windows.create(createOptions);
+  } catch (error) {
+    if (!("left" in createOptions) && !("top" in createOptions)) throw error;
+    const unpositionedOptions = { ...createOptions };
+    delete unpositionedOptions.left;
+    delete unpositionedOptions.top;
+    try {
+      created = await chrome.windows.create(unpositionedOptions);
+    } catch (unpositionedError) {
+      const browserSizedOptions = { ...unpositionedOptions };
+      delete browserSizedOptions.width;
+      delete browserSizedOptions.height;
+      try {
+        created = await chrome.windows.create(browserSizedOptions);
+      } catch {
+        throw unpositionedError;
+      }
+    }
+  }
+  if (!Number.isInteger(created?.id)) throw new Error("Chrome did not create the Pi Annotate window");
+  const pickerTabId = created.tabs?.find((tab) => tab.url === popupUrl)?.id || created.tabs?.[0]?.id;
+  await updatePickerState({
+    windowId: created.id,
+    pickerTabId: Number.isInteger(pickerTabId) ? pickerTabId : null,
+  });
+  return { windowId: created.id, reused: false };
+}
+
+async function openShortcutSettings() {
+  const normalWindow = await getLastFocusedNormalWindow();
+  const created = await chrome.tabs.create({
+    ...(Number.isInteger(normalWindow?.id) ? { windowId: normalWindow.id } : {}),
+    url: "chrome://extensions/shortcuts",
+    active: true,
+  });
+  if (Number.isInteger(normalWindow?.id)) {
+    await chrome.windows.update(normalWindow.id, { focused: true });
+  }
+  return { opened: true, tabId: created?.id };
 }
 
 async function sendToContentScript(tabId, message) {
@@ -276,15 +486,13 @@ async function sendToContentScript(tabId, message) {
 async function startAnnotation(requestedSessionId) {
   const config = await getStoredConfig({ requireComplete: true });
   const sessionId = validateSessionId(requestedSessionId || config.selectedSessionId);
-  await chrome.storage.local.set({ selectedSessionId: sessionId });
-
-  const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
-  if (!tab?.id || isRestrictedUrl(tab.url)) {
-    throw new Error("Open a regular web page before starting annotation");
-  }
+  const tab = await resolveTargetTab();
+  const baseOrigin = pageOrigin(tab.url);
 
   await sendToContentScript(tab.id, { type: "START_ANNOTATION", sessionId });
-  return { started: true };
+  await chrome.storage.local.set({ selectedSessionId: sessionId });
+  await rememberSessionForOrigin(baseOrigin, sessionId);
+  return { started: true, baseOrigin };
 }
 
 async function deliverAnnotations(message) {
@@ -343,6 +551,9 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
     case "SAVE_BROKER_CONFIG":
       return runMessageTask(() => saveBrokerConfig(message), sendResponse);
 
+    case "OPEN_SHORTCUT_SETTINGS":
+      return runMessageTask(openShortcutSettings, sendResponse);
+
     case "COMPLETE_PAIRING":
       return runMessageTask(() => {
         if (!isTrustedPairingConfirmation(sender)) {
@@ -384,9 +595,26 @@ chrome.runtime.onMessageExternal.addListener((message, sender, sendResponse) => 
   return runMessageTask(() => openPairingConfirmation(message, sender), sendResponse);
 });
 
-chrome.commands.onCommand.addListener((command) => {
-  if (command !== "toggle-picker") return;
-  startAnnotation().catch(() => {
-    // The popup provides actionable setup/session errors; keep shortcut failures quiet.
+chrome.action.onClicked.addListener((tab) => {
+  return openPickerWindow(tab).catch(() => {
+    // Chrome owns action errors; the next click retries from a fresh target tab.
   });
+});
+
+chrome.commands.onCommand.addListener((command) => {
+  if (command !== "toggle-picker") return undefined;
+  return openPickerWindow().catch(() => {
+    // Keep command failures quiet; the toolbar action remains available.
+  });
+});
+
+chrome.windows.onRemoved.addListener((windowId) => {
+  getPickerState()
+    .then((state) => {
+      if (state.windowId === windowId) {
+        return updatePickerState({ windowId: null, pickerTabId: null });
+      }
+      return undefined;
+    })
+    .catch(() => {});
 });

@@ -1,4 +1,4 @@
-// Pi Annotate - Broker setup and annotation-session picker
+// Pi Annotate - Centered session picker and settings
 
 const endpointInput = document.getElementById("broker-endpoint");
 const tokenInput = document.getElementById("broker-token");
@@ -6,13 +6,21 @@ const form = document.getElementById("broker-form");
 const saveButton = document.getElementById("save-btn");
 const toggleTokenButton = document.getElementById("toggle-token");
 const refreshButton = document.getElementById("refresh-btn");
-const sessionSelect = document.getElementById("session-select");
+const settingsButton = document.getElementById("settings-btn");
+const settingsPanel = document.getElementById("settings-panel");
+const sessionList = document.getElementById("session-list");
 const emptySessions = document.getElementById("empty-sessions");
 const startButton = document.getElementById("start-btn");
 const statusDot = document.getElementById("status-dot");
 const statusText = document.getElementById("status-text");
+const baseOriginText = document.getElementById("base-origin");
+const shortcutKey = document.getElementById("shortcut-key");
+const editShortcutButton = document.getElementById("edit-shortcut");
 
 let configured = false;
+let selectedSessionId = "";
+let settingsOpen = false;
+let refreshSequence = 0;
 
 function errorMessage(error, fallback = "Something went wrong") {
   const value = error instanceof Error ? error.message : String(error || fallback);
@@ -24,9 +32,20 @@ function setStatus(kind, message) {
   statusText.textContent = message;
 }
 
-function setBusy(button, busy, busyText, normalText) {
+function setButtonBusy(button, busy, busyText, normalText) {
   button.disabled = busy;
   button.textContent = busy ? busyText : normalText;
+}
+
+function setRefreshBusy(busy) {
+  refreshButton.disabled = busy;
+  refreshButton.classList.toggle("refreshing", busy);
+}
+
+function setSettingsOpen(open) {
+  settingsOpen = Boolean(open);
+  settingsPanel.classList.toggle("hidden", !settingsOpen);
+  settingsButton.setAttribute("aria-expanded", String(settingsOpen));
 }
 
 function parseBrokerInput() {
@@ -57,50 +76,105 @@ function parseBrokerInput() {
   };
 }
 
-function renderSessions(sessions, selectedSessionId = "") {
-  sessionSelect.replaceChildren();
+function displayOrigin(origin) {
+  if (!origin) return "";
+  try {
+    return `for ${new URL(origin).host}`;
+  } catch {
+    return "";
+  }
+}
+
+async function selectSession(sessionId) {
+  selectedSessionId = sessionId;
+  startButton.disabled = !selectedSessionId;
+  try {
+    const response = await chrome.runtime.sendMessage({
+      type: "SELECT_SESSION",
+      sessionId,
+    });
+    if (response?.error) throw new Error(response.error);
+  } catch (error) {
+    setStatus("error", errorMessage(error, "Could not select this session"));
+  }
+}
+
+function renderSessions(sessions, storedSessionId = "", recommendedSessionId = "") {
+  sessionList.replaceChildren();
+  const availableIds = new Set(sessions.map((session) => session.id));
+  const recommended = availableIds.has(recommendedSessionId) ? recommendedSessionId : "";
+  selectedSessionId = recommended || (availableIds.has(storedSessionId) ? storedSessionId : sessions[0]?.id || "");
 
   if (!sessions.length) {
-    const option = document.createElement("option");
-    option.value = "";
-    option.textContent = "No sessions available";
-    sessionSelect.appendChild(option);
-    sessionSelect.disabled = true;
     emptySessions.classList.remove("hidden");
     startButton.disabled = true;
     return "";
   }
 
-  for (const session of sessions) {
-    const option = document.createElement("option");
-    option.value = session.id;
-    option.textContent = session.label;
-    sessionSelect.appendChild(option);
+  emptySessions.classList.add("hidden");
+  const orderedSessions = recommended
+    ? [sessions.find((session) => session.id === recommended), ...sessions.filter((session) => session.id !== recommended)]
+    : sessions;
+
+  for (const session of orderedSessions) {
+    const option = document.createElement("label");
+    option.className = "session-option";
+
+    const radio = document.createElement("input");
+    radio.type = "radio";
+    radio.name = "annotation-session";
+    radio.value = session.id;
+    radio.checked = session.id === selectedSessionId;
+    radio.addEventListener("change", () => {
+      if (radio.checked) selectSession(session.id);
+    });
+
+    const copy = document.createElement("span");
+    copy.className = "session-copy";
+    const label = document.createElement("span");
+    label.className = "session-label";
+    label.textContent = session.label;
+    copy.appendChild(label);
+
+    if (session.id === recommended) {
+      const badge = document.createElement("span");
+      badge.className = "recommendation";
+      badge.textContent = "Last used for this site";
+      copy.appendChild(badge);
+    }
+
+    option.appendChild(radio);
+    option.appendChild(copy);
+    sessionList.appendChild(option);
   }
 
-  sessionSelect.disabled = false;
-  emptySessions.classList.add("hidden");
-  sessionSelect.value = sessions.some((session) => session.id === selectedSessionId)
-    ? selectedSessionId
-    : sessions[0].id;
   startButton.disabled = false;
-  return sessionSelect.value;
+  return selectedSessionId;
 }
 
 async function refreshSessions() {
+  const sequence = ++refreshSequence;
   if (!configured) {
     renderSessions([]);
-    setStatus("", "Save a broker endpoint and token first.");
+    baseOriginText.textContent = "";
+    setStatus("", "Connect to a broker in settings to begin.");
     return;
   }
 
-  setBusy(refreshButton, true, "Refreshing…", "Refresh");
-  setStatus("checking", "Checking broker and loading sessions…");
+  setRefreshBusy(true);
+  setStatus("checking", "Loading available annotation sessions…");
   try {
     const response = await chrome.runtime.sendMessage({ type: "LIST_SESSIONS" });
+    if (sequence !== refreshSequence) return;
     if (response?.error) throw new Error(response.error);
     const sessions = Array.isArray(response?.sessions) ? response.sessions : [];
-    const renderedSessionId = renderSessions(sessions, response?.selectedSessionId || "");
+    const renderedSessionId = renderSessions(
+      sessions,
+      response?.selectedSessionId || "",
+      response?.recommendedSessionId || "",
+    );
+    baseOriginText.textContent = displayOrigin(response?.baseOrigin || "");
+
     if (renderedSessionId && renderedSessionId !== response?.selectedSessionId) {
       const selectionResponse = await chrome.runtime.sendMessage({
         type: "SELECT_SESSION",
@@ -108,16 +182,32 @@ async function refreshSessions() {
       });
       if (selectionResponse?.error) throw new Error(selectionResponse.error);
     }
+
     if (sessions.length) {
       setStatus("connected", `${sessions.length} annotation session${sessions.length === 1 ? "" : "s"} available.`);
     } else {
       setStatus("connected", "Broker connected. No Pi sessions are available yet.");
     }
   } catch (error) {
+    if (sequence !== refreshSequence) return;
     renderSessions([]);
+    baseOriginText.textContent = "";
     setStatus("error", errorMessage(error, "Could not reach the broker"));
   } finally {
-    setBusy(refreshButton, false, "Refreshing…", "Refresh");
+    if (sequence === refreshSequence) setRefreshBusy(false);
+  }
+}
+
+async function loadShortcut() {
+  try {
+    const commands = await chrome.commands.getAll();
+    const command = commands.find((candidate) => candidate.name === "toggle-picker");
+    const shortcut = command?.shortcut || "Not set";
+    shortcutKey.textContent = shortcut;
+    shortcutKey.classList.toggle("unassigned", !command?.shortcut);
+  } catch {
+    shortcutKey.textContent = "Open Chrome shortcut settings";
+    shortcutKey.classList.add("unassigned");
   }
 }
 
@@ -132,7 +222,7 @@ form.addEventListener("submit", async (event) => {
     return;
   }
 
-  setBusy(saveButton, true, "Connecting…", "Save & connect");
+  setButtonBusy(saveButton, true, "Connecting…", "Save & connect");
   setStatus("checking", "Requesting access to this broker…");
   try {
     const granted = await chrome.permissions.request({ origins: [input.permissionOrigin] });
@@ -147,11 +237,12 @@ form.addEventListener("submit", async (event) => {
 
     configured = true;
     endpointInput.value = response.endpoint;
+    setSettingsOpen(false);
     await refreshSessions();
   } catch (error) {
     setStatus("error", errorMessage(error, "Could not save broker configuration"));
   } finally {
-    setBusy(saveButton, false, "Connecting…", "Save & connect");
+    setButtonBusy(saveButton, false, "Connecting…", "Save & connect");
   }
 });
 
@@ -162,48 +253,61 @@ toggleTokenButton.addEventListener("click", () => {
   toggleTokenButton.setAttribute("aria-label", showing ? "Show broker token" : "Hide broker token");
 });
 
+settingsButton.addEventListener("click", () => setSettingsOpen(!settingsOpen));
 refreshButton.addEventListener("click", refreshSessions);
 
-sessionSelect.addEventListener("change", async () => {
-  startButton.disabled = !sessionSelect.value;
-  if (!sessionSelect.value) return;
-  const response = await chrome.runtime.sendMessage({
-    type: "SELECT_SESSION",
-    sessionId: sessionSelect.value,
-  });
-  if (response?.error) setStatus("error", response.error);
+editShortcutButton.addEventListener("click", async () => {
+  try {
+    const response = await chrome.runtime.sendMessage({ type: "OPEN_SHORTCUT_SETTINGS" });
+    if (response?.error) throw new Error(response.error);
+  } catch (error) {
+    setStatus("error", errorMessage(error, "Could not open Chrome shortcut settings"));
+  }
 });
 
 startButton.addEventListener("click", async () => {
-  if (!sessionSelect.value) return;
-  setBusy(startButton, true, "Starting…", "Start annotation");
+  if (!selectedSessionId) return;
+  setButtonBusy(startButton, true, "Starting…", "Start annotation");
   try {
     const response = await chrome.runtime.sendMessage({
       type: "START_ANNOTATION",
-      sessionId: sessionSelect.value,
+      sessionId: selectedSessionId,
     });
     if (response?.error) throw new Error(response.error);
     if (!response?.started) throw new Error("Annotation did not start");
     window.close();
   } catch (error) {
     setStatus("error", errorMessage(error, "Could not start annotation"));
-    setBusy(startButton, false, "Starting…", "Start annotation");
+    setButtonBusy(startButton, false, "Starting…", "Start annotation");
   }
 });
 
-const isMac = navigator.platform.toUpperCase().includes("MAC");
-document.getElementById("shortcut-key").textContent = isMac ? "⌘ Shift P" : "Ctrl+Shift+P";
+chrome.runtime.onMessage.addListener((message) => {
+  if (message?.type === "PICKER_CONTEXT_UPDATED") {
+    refreshSessions();
+  }
+  return false;
+});
+
+window.addEventListener("focus", loadShortcut);
 
 async function initialize() {
   renderSessions([]);
+  await loadShortcut();
   try {
     const response = await chrome.runtime.sendMessage({ type: "GET_BROKER_CONFIG" });
     if (response?.error) throw new Error(response.error);
     endpointInput.value = response?.endpoint || "";
     tokenInput.value = response?.token || "";
     configured = Boolean(response?.endpoint && response?.token);
-    if (configured) await refreshSessions();
+    setSettingsOpen(!configured);
+    if (configured) {
+      await refreshSessions();
+    } else {
+      setStatus("", "Connect to a broker in settings to begin.");
+    }
   } catch (error) {
+    setSettingsOpen(true);
     setStatus("error", errorMessage(error, "Could not load broker configuration"));
   }
 }

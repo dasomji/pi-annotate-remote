@@ -136,6 +136,12 @@ function createHarness() {
   return { document, ids, runtimeListener, sentMessages };
 }
 
+test("annotation bar is a floating rounded panel with a multiline context field", () => {
+  assert.match(contentSource, /#pi-panel\s*\{[\s\S]*?bottom: 20px;[\s\S]*?left: 30px;[\s\S]*?right: 30px;/);
+  assert.match(contentSource, /#pi-panel\s*\{[\s\S]*?border-radius: 14px;/);
+  assert.match(contentSource, /<textarea id="pi-context" rows="2"/);
+});
+
 test("content UI stays open with Retry until broker delivery is acknowledged", async () => {
   const harness = createHarness();
   harness.runtimeListener({ type: "START_ANNOTATION", sessionId: "session_abcdefghijkl" }, {}, () => {});

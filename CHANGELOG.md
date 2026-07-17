@@ -15,7 +15,9 @@ All notable changes to Pi Annotate.
 - Conflict-safe automatic Tailscale Serve setup on the broker port, with verified MagicDNS endpoint discovery, idempotent route reuse, bounded warnings, and `PI_ANNOTATE_TAILSCALE=off` as an opt-out.
 - Shared detached localhost broker with bearer authentication, private XDG-aware state, bounded requests, local IPC session registration, reconnects, exact opaque-session routing, delivery acknowledgements, and timeouts.
 - `/annotate on`, `/annotate off`, `/annotate status`, and `/annotate setup` lifecycle controls.
-- Popup broker endpoint/token setup, connection testing, live multi-session selection, refresh, loading/empty/error states, and active-tab annotation start.
+- Centered live-session picker with radio options, circular refresh action, connection settings behind a cog, loading/empty/error states, and active-page annotation start.
+- Browser-local session recommendations keyed by page origin, with the last live session used for a site preselected and labelled in the picker.
+- Shortcut settings that show Chrome's active assignment and open `chrome://extensions/shortcuts` when it is missing or needs to change.
 - Draggable minimized annotation bubble with selection count and no reserved bottom-page space.
 - Accessible three-Escape abort confirmation flow; Escape no longer immediately discards annotation work.
 - Delivery retry state that preserves the content UI until the selected Pi session acknowledges receipt.
@@ -25,7 +27,10 @@ All notable changes to Pi Annotate.
 - `/annotate` now prints a fresh pairing link when Tailscale Serve is active, followed by the exact verified HTTPS endpoint and bearer token as a manual fallback; `/annotate setup` forces a fresh Serve check and pairing code.
 - Broker health now reports a protocol version so Pi can replace an incompatible detached broker automatically while annotation sessions reconnect.
 - Multi-select is the default for every new annotation session; Single remains available in the toolbar.
-- Content scripts are injected only into the active tab after an explicit popup or keyboard action.
+- Toolbar and keyboard actions now open the same centered picker instead of having the shortcut silently start annotation with a saved session.
+- Content scripts are injected only into the picker’s remembered target tab after an explicit **Start annotation** action.
+- The annotation bar is now a rounded floating box with 30px side margins, a 20px bottom margin, and a multiline general-context field.
+- Full screenshot mode is described accurately as the visible viewport rather than the entire scrollable page.
 - Broker host permission is optional and requested for only the configured hostname. Remote brokers require HTTPS; localhost HTTP remains available for development.
 - Pi sessions are labelled with project directory and Git branch while routing uses a random opaque ID.
 

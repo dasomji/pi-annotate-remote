@@ -4,195 +4,321 @@
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <style>
-    * { box-sizing: border-box; }
-    body {
-      width: 380px;
-      margin: 0;
-      padding: 16px;
-      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
-      background: #18181b;
-      color: #e5e5e5;
+    :root {
+      color-scheme: dark;
+      --bg: #18181b;
+      --card: #202023;
+      --elevated: #27272a;
+      --hover: #323238;
+      --border: #3f3f46;
+      --fg: #f4f4f5;
+      --muted: #a1a1aa;
+      --dim: #71717a;
+      --accent: #818cf8;
+      --accent-strong: #6366f1;
+      --success: #22c55e;
+      --warning: #eab308;
+      --error: #ef4444;
     }
-    button, input, select { font: inherit; }
+    * { box-sizing: border-box; }
+    html, body { min-height: 100%; }
+    body {
+      min-width: 420px;
+      margin: 0;
+      padding: 20px;
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+      background: var(--bg);
+      color: var(--fg);
+    }
+    button, input { font: inherit; }
+    button { color: inherit; }
     .header {
       display: flex;
       align-items: center;
-      gap: 8px;
-      margin-bottom: 14px;
-      padding-bottom: 12px;
-      border-bottom: 1px solid #27272a;
+      gap: 10px;
+      margin-bottom: 16px;
+    }
+    .brand {
+      display: flex;
+      min-width: 0;
+      align-items: center;
+      gap: 9px;
+      margin-right: auto;
     }
     .logo {
-      font-size: 20px;
-      font-weight: 700;
-      background: linear-gradient(135deg, #a78bfa, #6366f1);
+      font-size: 23px;
+      font-weight: 750;
+      line-height: 1;
+      background: linear-gradient(135deg, #c4b5fd, #6366f1);
       -webkit-background-clip: text;
       -webkit-text-fill-color: transparent;
     }
-    .title { font-size: 14px; font-weight: 650; }
+    .title { font-size: 15px; font-weight: 680; }
+    .icon-button {
+      display: inline-flex;
+      width: 36px;
+      height: 36px;
+      align-items: center;
+      justify-content: center;
+      padding: 0;
+      border: 1px solid transparent;
+      border-radius: 9px;
+      background: transparent;
+      color: var(--muted);
+      cursor: pointer;
+    }
+    .icon-button:hover:not(:disabled),
+    .icon-button[aria-expanded="true"] {
+      border-color: var(--border);
+      background: var(--elevated);
+      color: white;
+    }
+    .icon-button:focus-visible, .btn:focus-visible, input:focus-visible {
+      outline: 2px solid var(--accent);
+      outline-offset: 2px;
+    }
+    .icon-button:disabled { cursor: wait; opacity: .45; }
+    #refresh-btn { border-radius: 50%; }
+    .icon-button svg { width: 18px; height: 18px; }
+    .icon-button.refreshing svg { animation: spin .8s linear infinite; }
+    @keyframes spin { to { transform: rotate(360deg); } }
+
     .status-bar {
       display: flex;
+      min-height: 42px;
       align-items: flex-start;
-      gap: 8px;
-      min-height: 38px;
-      padding: 10px 12px;
-      margin-bottom: 14px;
-      background: #27272a;
-      border-radius: 6px;
+      gap: 9px;
+      margin-bottom: 16px;
+      padding: 11px 12px;
+      border: 1px solid #303038;
+      border-radius: 10px;
+      background: var(--card);
     }
     .status-dot {
       width: 8px;
       height: 8px;
-      margin-top: 3px;
-      border-radius: 50%;
-      background: #71717a;
       flex: none;
+      margin-top: 4px;
+      border-radius: 50%;
+      background: var(--dim);
     }
-    .status-dot.connected { background: #22c55e; }
-    .status-dot.checking { background: #eab308; animation: pulse 1s infinite; }
-    .status-dot.error { background: #ef4444; }
-    @keyframes pulse { 50% { opacity: .45; } }
-    .status-text { font-size: 12px; line-height: 1.45; overflow-wrap: anywhere; }
-    .section { margin-bottom: 14px; }
+    .status-dot.connected { background: var(--success); }
+    .status-dot.checking { background: var(--warning); animation: pulse 1s infinite; }
+    .status-dot.error { background: var(--error); }
+    @keyframes pulse { 50% { opacity: .4; } }
+    .status-text { min-width: 0; font-size: 12px; line-height: 1.5; overflow-wrap: anywhere; }
+
     .section-heading {
       display: flex;
-      align-items: center;
+      align-items: baseline;
       justify-content: space-between;
-      margin-bottom: 7px;
+      gap: 12px;
+      margin-bottom: 9px;
     }
-    .label, label {
-      display: block;
-      margin-bottom: 6px;
-      color: #a1a1aa;
-      font-size: 11px;
-      font-weight: 600;
+    h2, h3 { margin: 0; }
+    h2 { font-size: 12px; font-weight: 680; letter-spacing: .02em; }
+    h3 { font-size: 11px; font-weight: 650; }
+    .section-hint { color: var(--dim); font-size: 10px; }
+
+    .session-list {
+      display: grid;
+      max-height: 310px;
+      gap: 7px;
+      overflow-y: auto;
+      padding-right: 2px;
     }
-    .hint { margin: 6px 0 0; color: #71717a; font-size: 10px; line-height: 1.45; }
-    input, select {
-      width: 100%;
-      padding: 9px 10px;
-      color: #e5e5e5;
-      background: #27272a;
-      border: 1px solid #3f3f46;
-      border-radius: 5px;
-      outline: none;
-      font-size: 12px;
-    }
-    input:focus, select:focus { border-color: #818cf8; box-shadow: 0 0 0 2px rgba(99,102,241,.2); }
-    input::placeholder { color: #52525b; }
-    .token-field { display: flex; gap: 6px; }
-    .token-field input { min-width: 0; font-family: ui-monospace, SFMono-Regular, Menlo, monospace; }
-    .btn {
-      padding: 8px 12px;
-      color: #d4d4d8;
-      background: #27272a;
-      border: 1px solid #3f3f46;
-      border-radius: 5px;
-      cursor: pointer;
-      font-size: 11px;
-      font-weight: 600;
-    }
-    .btn:hover:not(:disabled) { background: #3f3f46; color: white; }
-    .btn:focus-visible { outline: 2px solid #818cf8; outline-offset: 2px; }
-    .btn:disabled { cursor: not-allowed; opacity: .5; }
-    .btn.primary {
-      width: 100%;
-      padding: 10px 14px;
-      color: white;
-      background: #6366f1;
-      border-color: #6366f1;
-      font-size: 12px;
-    }
-    .btn.primary:hover:not(:disabled) { background: #4f46e5; }
-    .btn.link { padding: 4px 7px; }
-    .session-box {
-      padding: 12px;
-      background: #202023;
+    .session-option {
+      display: flex;
+      align-items: center;
+      gap: 11px;
+      min-height: 48px;
+      padding: 10px 12px;
       border: 1px solid #323238;
-      border-radius: 6px;
+      border-radius: 10px;
+      background: var(--card);
+      cursor: pointer;
+    }
+    .session-option:hover { border-color: #52525b; background: #242429; }
+    .session-option:has(input:checked) {
+      border-color: var(--accent);
+      background: rgba(99, 102, 241, .12);
+      box-shadow: inset 0 0 0 1px rgba(129, 140, 248, .12);
+    }
+    .session-option input {
+      width: 16px;
+      height: 16px;
+      flex: none;
+      margin: 0;
+      accent-color: var(--accent-strong);
+      cursor: pointer;
+    }
+    .session-copy { min-width: 0; flex: 1; }
+    .session-label {
+      display: block;
+      color: #e4e4e7;
+      font-size: 12px;
+      font-weight: 570;
+      line-height: 1.35;
+      overflow-wrap: anywhere;
+    }
+    .recommendation {
+      display: inline-block;
+      margin-top: 4px;
+      padding: 2px 6px;
+      border-radius: 999px;
+      background: rgba(129, 140, 248, .16);
+      color: #c7d2fe;
+      font-size: 9px;
+      font-weight: 650;
     }
     .empty {
       margin: 0;
-      padding: 5px 2px;
-      color: #a1a1aa;
+      padding: 18px 16px;
+      border: 1px dashed var(--border);
+      border-radius: 10px;
+      color: var(--muted);
       font-size: 11px;
-      line-height: 1.5;
-    }
-    .empty code { color: #c4b5fd; }
-    .shortcut {
-      margin-top: 8px;
-      color: #71717a;
-      font-size: 10px;
+      line-height: 1.55;
       text-align: center;
     }
-    .shortcut kbd {
-      padding: 2px 5px;
-      color: #a1a1aa;
-      background: #27272a;
-      border: 1px solid #3f3f46;
-      border-radius: 3px;
-      font-family: ui-monospace, monospace;
+    .empty code, .hint code { color: #c4b5fd; }
+
+    .btn {
+      padding: 9px 12px;
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      background: var(--elevated);
+      color: #d4d4d8;
+      cursor: pointer;
+      font-size: 11px;
+      font-weight: 650;
     }
-    .divider { height: 1px; margin: 14px 0; background: #27272a; }
-    .footer { color: #52525b; font-size: 10px; line-height: 1.45; }
-    .footer a { color: #818cf8; text-decoration: none; }
-    .footer a:hover { text-decoration: underline; }
+    .btn:hover:not(:disabled) { background: var(--hover); color: white; }
+    .btn:disabled { cursor: not-allowed; opacity: .48; }
+    .btn.primary {
+      width: 100%;
+      margin-top: 16px;
+      padding: 12px 16px;
+      border-color: var(--accent-strong);
+      background: var(--accent-strong);
+      color: white;
+      font-size: 12px;
+    }
+    .btn.primary:hover:not(:disabled) { background: #4f46e5; }
+
+    .settings-panel {
+      margin-top: 2px;
+      padding: 16px;
+      border: 1px solid var(--border);
+      border-radius: 12px;
+      background: var(--card);
+    }
+    .settings-panel > h2 { margin-bottom: 14px; }
+    .field { margin-bottom: 13px; }
+    .field > label {
+      display: block;
+      margin-bottom: 6px;
+      color: var(--muted);
+      font-size: 10px;
+      font-weight: 650;
+    }
+    input[type="url"], input[type="password"], input[type="text"] {
+      width: 100%;
+      padding: 9px 10px;
+      border: 1px solid var(--border);
+      border-radius: 7px;
+      outline: none;
+      background: var(--bg);
+      color: var(--fg);
+      font-size: 11px;
+    }
+    input:focus { border-color: var(--accent); box-shadow: 0 0 0 2px rgba(99,102,241,.18); }
+    input::placeholder { color: #52525b; }
+    .token-field { display: flex; gap: 7px; }
+    .token-field input { min-width: 0; font-family: ui-monospace, SFMono-Regular, Menlo, monospace; }
+    .hint { margin: 6px 0 0; color: var(--dim); font-size: 9px; line-height: 1.5; }
+    .settings-divider { height: 1px; margin: 16px 0; background: #35353b; }
+    .shortcut-row {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      margin-top: 9px;
+    }
+    .shortcut-key {
+      min-width: 0;
+      flex: 1;
+      padding: 8px 10px;
+      border: 1px solid var(--border);
+      border-radius: 7px;
+      background: var(--bg);
+      color: var(--muted);
+      font: 11px ui-monospace, SFMono-Regular, Menlo, monospace;
+    }
+    .shortcut-key.unassigned { color: var(--warning); }
     .hidden { display: none !important; }
   </style>
 </head>
 <body>
   <header class="header">
-    <span class="logo" aria-hidden="true">π</span>
-    <span class="title">Pi Annotate</span>
+    <div class="brand">
+      <span class="logo" aria-hidden="true">π</span>
+      <span class="title">Pi Annotate</span>
+    </div>
+    <button class="icon-button" id="refresh-btn" type="button" title="Refresh annotation sessions" aria-label="Refresh annotation sessions">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+        <path d="M20 11a8.1 8.1 0 0 0-15.5-2M4 4v5h5"/><path d="M4 13a8.1 8.1 0 0 0 15.5 2M20 20v-5h-5"/>
+      </svg>
+    </button>
+    <button class="icon-button" id="settings-btn" type="button" title="Connection and shortcut settings" aria-label="Connection and shortcut settings" aria-expanded="false" aria-controls="settings-panel">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+        <circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.7 1.7 0 0 0 .34 1.88l.06.06-2.83 2.83-.06-.06a1.7 1.7 0 0 0-1.88-.34 1.7 1.7 0 0 0-1.03 1.56V21h-4v-.08A1.7 1.7 0 0 0 9 19.37a1.7 1.7 0 0 0-1.88.34l-.06.06-2.83-2.83.06-.06A1.7 1.7 0 0 0 4.63 15 1.7 1.7 0 0 0 3.08 14H3v-4h.08A1.7 1.7 0 0 0 4.63 9a1.7 1.7 0 0 0-.34-1.88l-.06-.06 2.83-2.83.06.06A1.7 1.7 0 0 0 9 4.63 1.7 1.7 0 0 0 10 3.08V3h4v.08A1.7 1.7 0 0 0 15 4.63a1.7 1.7 0 0 0 1.88-.34l.06-.06 2.83 2.83-.06.06A1.7 1.7 0 0 0 19.37 9 1.7 1.7 0 0 0 20.92 10H21v4h-.08A1.7 1.7 0 0 0 19.4 15z"/>
+      </svg>
+    </button>
   </header>
 
   <div class="status-bar" role="status" aria-live="polite">
     <span class="status-dot" id="status-dot" aria-hidden="true"></span>
-    <span class="status-text" id="status-text">Configure a broker to begin.</span>
+    <span class="status-text" id="status-text">Checking connection…</span>
   </div>
 
-  <form id="broker-form">
-    <div class="section">
-      <label for="broker-endpoint">Broker endpoint</label>
-      <input id="broker-endpoint" type="url" inputmode="url" autocomplete="url"
-        placeholder="https://machine.tailnet.ts.net" required>
-      <p class="hint">Use the HTTPS address printed by <code>/annotate setup</code>.</p>
-    </div>
-
-    <div class="section">
-      <label for="broker-token">Broker token</label>
-      <div class="token-field">
-        <input id="broker-token" type="password" autocomplete="off" spellcheck="false" required>
-        <button class="btn" id="toggle-token" type="button" aria-label="Show broker token">Show</button>
+  <main id="picker-panel">
+    <section aria-labelledby="sessions-heading">
+      <div class="section-heading">
+        <h2 id="sessions-heading">Send annotation to</h2>
+        <span class="section-hint" id="base-origin"></span>
       </div>
-    </div>
+      <div class="session-list" id="session-list" role="radiogroup" aria-labelledby="sessions-heading"></div>
+      <p class="empty hidden" id="empty-sessions">Run <code>/annotate</code> in the Pi session you want to target, then refresh.</p>
+    </section>
+    <button class="btn primary" id="start-btn" type="button" disabled>Start annotation</button>
+  </main>
 
-    <button class="btn primary" id="save-btn" type="submit">Save &amp; connect</button>
-  </form>
+  <section class="settings-panel hidden" id="settings-panel" aria-labelledby="settings-heading">
+    <h2 id="settings-heading">Connection settings</h2>
+    <form id="broker-form">
+      <div class="field">
+        <label for="broker-endpoint">Broker endpoint</label>
+        <input id="broker-endpoint" type="url" inputmode="url" autocomplete="url" placeholder="https://machine.tailnet.ts.net" required>
+        <p class="hint">Use the HTTPS address printed by <code>/annotate setup</code>.</p>
+      </div>
+      <div class="field">
+        <label for="broker-token">Broker token</label>
+        <div class="token-field">
+          <input id="broker-token" type="password" autocomplete="off" spellcheck="false" required>
+          <button class="btn" id="toggle-token" type="button" aria-label="Show broker token">Show</button>
+        </div>
+      </div>
+      <button class="btn primary" id="save-btn" type="submit">Save &amp; connect</button>
+    </form>
 
-  <div class="divider"></div>
-
-  <section class="section" aria-labelledby="sessions-heading">
-    <div class="section-heading">
-      <span class="label" id="sessions-heading">Annotation session</span>
-      <button class="btn link" id="refresh-btn" type="button">Refresh</button>
+    <div class="settings-divider"></div>
+    <h3>Open Pi Annotate shortcut</h3>
+    <div class="shortcut-row">
+      <kbd class="shortcut-key" id="shortcut-key">Checking…</kbd>
+      <button class="btn" id="edit-shortcut" type="button">Edit shortcut</button>
     </div>
-    <div class="session-box">
-      <select id="session-select" aria-label="Annotation session" disabled>
-        <option value="">No sessions available</option>
-      </select>
-      <p class="empty" id="empty-sessions">Run <code>/annotate</code> in the Pi session you want to target, then refresh.</p>
-    </div>
+    <p class="hint">Chrome manages extension shortcuts. The button opens Chrome’s shortcut settings.</p>
   </section>
-
-  <button class="btn primary" id="start-btn" type="button" disabled>Start annotation</button>
-  <div class="shortcut">Keyboard shortcut: <kbd id="shortcut-key">Ctrl+Shift+P</kbd></div>
-
-  <div class="divider"></div>
-  <footer class="footer">
-    The token stays in this browser profile and broker requests are made only by the extension service worker.
-    <a href="https://github.com/nicobailon/pi-annotate#quick-start" target="_blank" rel="noreferrer">Setup guide →</a>
-  </footer>
 
   <script src="popup.js"></script>
 </body>

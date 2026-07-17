@@ -5,16 +5,64 @@ import vm from "node:vm";
 
 const backgroundSource = readFileSync(new URL("../chrome-extension/background.js", import.meta.url), "utf8");
 const EXTENSION_ID = "bpeadifabilnfpephegaodjbcjjfjghk";
+const TARGET_TAB = {
+  id: 7,
+  windowId: 3,
+  active: true,
+  url: "https://example.test/products/42",
+};
 
-function createHarness({ fetchImpl } = {}) {
+function createStorageArea(values) {
+  return {
+    async setAccessLevel() {},
+    async get(keys) {
+      const requested = Array.isArray(keys) ? keys : Object.keys(keys || values);
+      return Object.fromEntries(requested.filter((key) => key in values).map((key) => [key, values[key]]));
+    },
+    async set(next) {
+      Object.assign(values, JSON.parse(JSON.stringify(next)));
+    },
+    async remove(keys) {
+      for (const key of Array.isArray(keys) ? keys : [keys]) delete values[key];
+    },
+  };
+}
+
+function createHarness({
+  fetchImpl,
+  targetTab = TARGET_TAB,
+  failPositionedWindow = false,
+  failSizedWindow = false,
+} = {}) {
   const storage = {};
+  const sessionStorage = {};
   const fetchCalls = [];
   const tabMessages = [];
   const injected = [];
   const createdTabs = [];
+  const createdWindows = [];
+  const windowUpdates = [];
+  const runtimeMessages = [];
+  const windows = new Map();
+  const normalWindow = {
+    id: 3,
+    left: 100,
+    top: 50,
+    width: 1_200,
+    height: 900,
+    focused: true,
+    type: "normal",
+    tabs: [{ ...targetTab, active: true }],
+  };
+  windows.set(normalWindow.id, normalWindow);
+
+  let nextTabId = 8;
+  let nextWindowId = 10;
   let messageListener;
   let externalMessageListener;
   let commandListener;
+  let actionListener;
+  let windowRemovedListener;
   let failFirstTabMessage = false;
 
   const chrome = {
@@ -23,6 +71,9 @@ function createHarness({ fetchImpl } = {}) {
       lastError: null,
       getURL(path) {
         return `chrome-extension://${EXTENSION_ID}/${path}`;
+      },
+      async sendMessage(message) {
+        runtimeMessages.push(JSON.parse(JSON.stringify(message)));
       },
       onMessage: {
         addListener(listener) {
@@ -35,6 +86,13 @@ function createHarness({ fetchImpl } = {}) {
         },
       },
     },
+    action: {
+      onClicked: {
+        addListener(listener) {
+          actionListener = listener;
+        },
+      },
+    },
     commands: {
       onCommand: {
         addListener(listener) {
@@ -43,15 +101,8 @@ function createHarness({ fetchImpl } = {}) {
       },
     },
     storage: {
-      local: {
-        async setAccessLevel() {},
-        async get(keys) {
-          return Object.fromEntries(keys.filter((key) => key in storage).map((key) => [key, storage[key]]));
-        },
-        async set(values) {
-          Object.assign(storage, values);
-        },
-      },
+      local: createStorageArea(storage),
+      session: createStorageArea(sessionStorage),
     },
     permissions: {
       async remove() {
@@ -59,12 +110,21 @@ function createHarness({ fetchImpl } = {}) {
       },
     },
     tabs: {
-      async query() {
-        return [{ id: 7, windowId: 3, url: "https://example.test/page" }];
+      async query(query) {
+        if (Number.isInteger(query?.windowId) && query.windowId !== targetTab.windowId) return [];
+        return [{ ...targetTab, active: true }];
+      },
+      async get(tabId) {
+        if (tabId === targetTab.id) return { ...targetTab, active: true };
+        for (const tab of createdTabs) {
+          if (tab.id === tabId) return tab;
+        }
+        throw new Error("No tab with id");
       },
       async create(options) {
-        createdTabs.push(JSON.parse(JSON.stringify(options)));
-        return { id: 8, ...options };
+        const tab = { id: nextTabId++, ...JSON.parse(JSON.stringify(options)) };
+        createdTabs.push(tab);
+        return tab;
       },
       async sendMessage(tabId, message) {
         if (failFirstTabMessage) {
@@ -77,6 +137,48 @@ function createHarness({ fetchImpl } = {}) {
         callback("data:image/png;base64,abc");
       },
     },
+    windows: {
+      async getLastFocused() {
+        return JSON.parse(JSON.stringify(normalWindow));
+      },
+      async get(windowId) {
+        const window = windows.get(windowId);
+        if (!window) throw new Error("No window with id");
+        return JSON.parse(JSON.stringify(window));
+      },
+      async create(options) {
+        if (
+          (failPositionedWindow && ("left" in options || "top" in options)) ||
+          (failSizedWindow && ("width" in options || "height" in options))
+        ) {
+          throw new Error("Invalid value for bounds");
+        }
+        const window = {
+          id: nextWindowId++,
+          ...JSON.parse(JSON.stringify(options)),
+          tabs: [{
+            id: nextTabId++,
+            active: true,
+            windowId: nextWindowId - 1,
+          }],
+        };
+        createdWindows.push(JSON.parse(JSON.stringify(options)));
+        windows.set(window.id, window);
+        return JSON.parse(JSON.stringify(window));
+      },
+      async update(windowId, options) {
+        const window = windows.get(windowId);
+        if (!window) throw new Error("No window with id");
+        Object.assign(window, options);
+        windowUpdates.push({ windowId, ...JSON.parse(JSON.stringify(options)) });
+        return JSON.parse(JSON.stringify(window));
+      },
+      onRemoved: {
+        addListener(listener) {
+          windowRemovedListener = listener;
+        },
+      },
+    },
     scripting: {
       async executeScript(options) {
         injected.push(JSON.parse(JSON.stringify(options)));
@@ -86,6 +188,7 @@ function createHarness({ fetchImpl } = {}) {
 
   const context = vm.createContext({
     AbortController,
+    Date,
     URL,
     chrome,
     clearTimeout,
@@ -111,9 +214,7 @@ function createHarness({ fetchImpl } = {}) {
       const keepAlive = messageListener(message, sender, (value) => {
         resolve(value === undefined ? undefined : JSON.parse(JSON.stringify(value)));
       });
-      if (!keepAlive) {
-        setImmediate(() => resolve(undefined));
-      }
+      if (!keepAlive) setImmediate(() => resolve(undefined));
       setTimeout(() => reject(new Error(`Timed out waiting for ${message.type}`)), 1_000);
     });
   }
@@ -131,17 +232,28 @@ function createHarness({ fetchImpl } = {}) {
 
   return {
     createdTabs,
+    createdWindows,
     fetchCalls,
     injected,
+    runtimeMessages,
     send,
     sendExternal,
+    sessionStorage,
     storage,
     tabMessages,
+    windowUpdates,
     setFailFirstTabMessage() {
       failFirstTabMessage = true;
     },
+    triggerAction(tab = targetTab) {
+      return actionListener(tab);
+    },
     triggerCommand(command) {
-      commandListener(command);
+      return commandListener(command);
+    },
+    removeWindow(windowId) {
+      windows.delete(windowId);
+      return windowRemovedListener(windowId);
     },
   };
 }
@@ -174,6 +286,8 @@ test("background stores broker config and lists only validated sessions", async 
   assert.deepEqual(response, {
     sessions: [{ id: "session_abcdefghijkl", label: "shop (main)" }],
     selectedSessionId: "",
+    recommendedSessionId: "",
+    baseOrigin: "",
   });
   assert.equal(harness.fetchCalls.length, 1);
   const [url, options] = harness.fetchCalls[0];
@@ -192,22 +306,120 @@ test("background rejects insecure remote endpoints", async () => {
   assert.deepEqual(harness.storage, {});
 });
 
-test("starting annotation injects the content script and carries the selected opaque session ID", async () => {
+test("toolbar action and keyboard command open one centered picker window", async () => {
+  const harness = createHarness();
+
+  await harness.triggerAction();
+  assert.deepEqual(harness.createdWindows, [{
+    type: "popup",
+    url: `chrome-extension://${EXTENSION_ID}/popup.html`,
+    focused: true,
+    width: 460,
+    height: 640,
+    left: 470,
+    top: 180,
+  }]);
+  assert.deepEqual(harness.sessionStorage.pickerState, {
+    targetTabId: 7,
+    targetWindowId: 3,
+    baseOrigin: "https://example.test",
+    windowId: 10,
+    pickerTabId: 8,
+  });
+  assert.deepEqual(harness.tabMessages, []);
+
+  await harness.triggerCommand("toggle-picker");
+  assert.equal(harness.createdWindows.length, 1);
+  assert.deepEqual(harness.windowUpdates.at(-1), { windowId: 10, focused: true });
+  assert.deepEqual(harness.runtimeMessages.at(-1), { type: "PICKER_CONTEXT_UPDATED" });
+});
+
+test("picker still opens when Chrome rejects the calculated centered bounds", async () => {
+  const harness = createHarness({ failPositionedWindow: true });
+
+  await harness.triggerAction();
+  assert.deepEqual(harness.createdWindows, [{
+    type: "popup",
+    url: `chrome-extension://${EXTENSION_ID}/popup.html`,
+    focused: true,
+    width: 460,
+    height: 640,
+  }]);
+});
+
+test("picker falls back to browser sizing when the display rejects every explicit bound", async () => {
+  const harness = createHarness({ failPositionedWindow: true, failSizedWindow: true });
+
+  await harness.triggerAction();
+  assert.deepEqual(harness.createdWindows, [{
+    type: "popup",
+    url: `chrome-extension://${EXTENSION_ID}/popup.html`,
+    focused: true,
+  }]);
+});
+
+test("shortcut settings open in the normal browser window", async () => {
+  const harness = createHarness();
+  const response = await harness.send({ type: "OPEN_SHORTCUT_SETTINGS" });
+
+  assert.equal(response.opened, true);
+  assert.deepEqual(harness.createdTabs[0], {
+    id: 8,
+    windowId: 3,
+    url: "chrome://extensions/shortcuts",
+    active: true,
+  });
+  assert.deepEqual(harness.windowUpdates.at(-1), { windowId: 3, focused: true });
+});
+
+test("starting annotation targets the remembered page and records its origin recommendation", async () => {
   const harness = createHarness();
   await configure(harness);
+  await harness.triggerAction();
   harness.setFailFirstTabMessage();
 
   const response = await harness.send({
     type: "START_ANNOTATION",
     sessionId: "session_abcdefghijkl",
   });
-  assert.deepEqual(response, { started: true });
+  assert.deepEqual(response, { started: true, baseOrigin: "https://example.test" });
   assert.deepEqual(harness.injected, [{ target: { tabId: 7 }, files: ["content.js"] }]);
   assert.deepEqual(harness.tabMessages, [{
     tabId: 7,
     message: { type: "START_ANNOTATION", sessionId: "session_abcdefghijkl" },
   }]);
   assert.equal(harness.storage.selectedSessionId, "session_abcdefghijkl");
+  assert.equal(
+    harness.storage.sessionRecommendationsByOrigin["https://example.test"].sessionId,
+    "session_abcdefghijkl",
+  );
+  assert.ok(Number.isFinite(harness.storage.sessionRecommendationsByOrigin["https://example.test"].updatedAt));
+});
+
+test("session listing recommends the last live session used on the active origin", async () => {
+  const sessions = [
+    { id: "session_abcdefghijkl", label: "shop (main)" },
+    { id: "session_mnopqrstuvwx", label: "admin (feature)" },
+  ];
+  const harness = createHarness({
+    fetchImpl: async () => ({
+      ok: true,
+      status: 200,
+      async text() { return JSON.stringify({ sessions }); },
+    }),
+  });
+  await configure(harness);
+  await harness.triggerAction();
+  await harness.send({ type: "START_ANNOTATION", sessionId: sessions[1].id });
+  await harness.send({ type: "SELECT_SESSION", sessionId: sessions[0].id });
+
+  const response = await harness.send({ type: "LIST_SESSIONS" });
+  assert.deepEqual(response, {
+    sessions,
+    selectedSessionId: sessions[0].id,
+    recommendedSessionId: sessions[1].id,
+    baseOrigin: "https://example.test",
+  });
 });
 
 test("annotation delivery POSTs to exactly the selected session and waits for broker success", async () => {

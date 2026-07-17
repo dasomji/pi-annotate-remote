@@ -24,6 +24,10 @@ _Avoid_: Session name, agent name
 An opaque identifier used by the broker to route annotations to one live annotation session.
 _Avoid_: Session label
 
+**Session recommendation**:
+A browser-local, advisory mapping from a page origin to the annotation session most recently used there. It preselects a live session but never changes broker routing by itself.
+_Avoid_: Project mapping, base URL binding
+
 **Annotator**:
 The browser extension and in-page interface used to create and submit an annotation.
 _Avoid_: Chrome plugin, picker

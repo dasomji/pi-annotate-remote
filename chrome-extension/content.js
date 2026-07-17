@@ -412,14 +412,17 @@
        ═══════════════════════════════════════════════════════════════════ */
     #pi-panel {
       position: fixed;
-      bottom: 0; left: 0; right: 0;
+      bottom: 20px;
+      left: 30px;
+      right: 30px;
       background: var(--pi-bg-card);
       color: var(--pi-fg);
       font-family: var(--pi-font-ui);
-      padding: 10px 16px;
+      padding: 12px 16px;
       z-index: ${Z_INDEX_PANEL};
-      box-shadow: 0 -4px 24px var(--pi-shadow);
-      border-top: 1px solid var(--pi-border-muted);
+      box-shadow: 0 8px 32px var(--pi-shadow);
+      border: 1px solid var(--pi-border-muted);
+      border-radius: 14px;
     }
     
     #pi-panel * { box-sizing: border-box; }
@@ -650,24 +653,28 @@
       margin-bottom: 8px;
     }
     
-    .pi-context-row input {
+    .pi-context-row textarea {
       width: 100%;
+      min-height: 58px;
+      max-height: 160px;
+      resize: vertical;
       background: var(--pi-bg-body);
       border: 1px solid var(--pi-border-muted);
-      border-radius: var(--pi-radius);
+      border-radius: 8px;
       color: var(--pi-fg);
       font-family: inherit;
       font-size: 13px;
-      padding: 8px 12px;
+      line-height: 1.45;
+      padding: 9px 12px;
     }
     
-    .pi-context-row input:focus {
+    .pi-context-row textarea:focus {
       outline: none;
       border-color: var(--pi-accent);
       box-shadow: 0 0 0 3px var(--pi-focus-ring);
     }
     
-    .pi-context-row input::placeholder { color: var(--pi-fg-dim); }
+    .pi-context-row textarea::placeholder { color: var(--pi-fg-dim); }
     
     .pi-actions {
       display: flex;
@@ -999,22 +1006,22 @@
         </div>
         <div class="pi-spacer"></div>
         <span class="pi-count" id="pi-count">0 selected</span>
-        <label class="pi-notes-toggle" title="Show/hide all note cards">
+        <label class="pi-notes-toggle" title="Show or hide floating element notes; comments stay attached">
           <input type="checkbox" id="pi-notes-visible" checked />
           <span>Notes</span>
         </label>
-        <label class="pi-notes-toggle" title="Capture computed styles, layout, and CSS variables">
+        <label class="pi-notes-toggle" title="Include computed CSS, parent layout, and CSS variables">
           <input type="checkbox" id="pi-debug-mode" />
           <span>Debug</span>
         </label>
-        <label class="pi-notes-toggle pi-etch-toggle" title="Record DevTools edits (style, class, CSS rule changes)">
+        <label class="pi-notes-toggle pi-etch-toggle" title="Record page DOM and CSS edits with before/after screenshots">
           <input type="checkbox" id="pi-etch-mode" />
           <span>Etch</span>
           <span class="pi-etch-badge" id="pi-etch-count" style="display:none"></span>
         </label>
       </div>
       <div class="pi-context-row">
-        <input type="text" id="pi-context" placeholder="General context (optional)..." />
+        <textarea id="pi-context" rows="2" placeholder="General context (optional)..."></textarea>
       </div>
       <div class="pi-actions">
         <div class="pi-delivery-error" id="pi-delivery-error" role="alert" aria-live="assertive" hidden></div>
@@ -1099,7 +1106,7 @@
   
   function getPanelReservedHeight() {
     if (!panelEl || panelMinimized) return 0;
-    return panelEl.offsetHeight || 96;
+    return (panelEl.offsetHeight || 96) + 20;
   }
 
   function setPanelMinimized(minimized) {
@@ -3126,7 +3133,7 @@
   }
   
   /**
-   * Add numbered badges to a full-page screenshot for selected elements
+   * Add numbered badges to a visible-viewport screenshot for selected elements
    * @param {string} dataUrl - Base64 screenshot data URL
    * @param {Array<{element: Element}>} elements - Selected elements with their DOM references
    * @returns {Promise<string>} Modified screenshot with badges
@@ -3246,7 +3253,7 @@
   async function handleSubmit() {
     if (deliveryPending) return;
     if (!sessionId) {
-      setDeliveryState(false, "No Pi annotation session is selected. Start again from the extension popup.");
+      setDeliveryState(false, "No Pi annotation session is selected. Start again from the extension picker.");
       return;
     }
 
@@ -3291,7 +3298,7 @@
           const fullScreenshot = resp.dataUrl;
           
           if (screenshotMode === "full") {
-            // Add numbered badges to the full screenshot so elements can be identified
+            // Add numbered badges to the viewport screenshot so elements can be identified
             screenshot = await addBadgesToScreenshot(fullScreenshot, selectedElements);
           } else {
             for (let i = 0; i < selectedElements.length; i++) {
