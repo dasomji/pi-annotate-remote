@@ -34,8 +34,6 @@
     "index.ts",
     "types.ts",
     "broker/",
-    "banner.png",
-    "demo.mp4",
     "chrome-extension/",
     "README.md",
     "CHANGELOG.md",
@@ -44,7 +42,6 @@
   "pi": {
     "extensions": [
       "./index.ts"
-    ],
-    "video": "https://github.com/dasomji/pi-annotate-remote/raw/refs/heads/main/demo.mp4"
+    ]
   }
 }

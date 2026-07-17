@@ -56,6 +56,7 @@ All notable changes to Pi Annotate.
 ### Removed
 - Native Messaging permission, host bridge, installer scripts, request socket protocol, and native-host setup/troubleshooting flow.
 - Dead cancellation plumbing left over from Native Messaging: the annotator's fire-and-forget `CANCEL` message (dropped by the service worker) and the unreachable cancelled-result formatting in the Pi extension.
+- The outdated demo video and its gallery reference, and the banner image from the published package (the README still shows it from the repository). The install tarball shrinks from ~4.5 MB back to ~200 KB.
 
 ## [0.4.3] - 2026-04-22
 
