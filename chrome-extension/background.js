@@ -9,6 +9,7 @@ const STORAGE_KEYS = ["brokerEndpoint", "brokerToken", "selectedSessionId"];
 const BROKER_TIMEOUT_MS = 20_000;
 const MAX_ERROR_LENGTH = 300;
 const MAX_SESSION_COUNT = 1_000;
+const PAIRING_CODE_PATTERN = /^[A-Za-z0-9_-]{43}$/;
 
 // Keep the bearer token out of content-script contexts. Popup and service
 // worker pages remain trusted extension contexts and can still use local storage.
@@ -113,6 +114,56 @@ async function saveBrokerConfig(message) {
   return { endpoint, selectedSessionId: changed ? "" : previous.selectedSessionId };
 }
 
+function validatePairingCode(value) {
+  if (typeof value !== "string" || !PAIRING_CODE_PATTERN.test(value)) {
+    throw new Error("Pairing code is invalid or expired");
+  }
+  return value;
+}
+
+function pairingEndpointFromSender(sender) {
+  let url;
+  try {
+    url = new URL(sender?.url || "");
+  } catch {
+    throw new Error("Pairing request did not come from a trusted Tailscale pairing page");
+  }
+
+  const isTailnetHttps = url.protocol === "https:" && url.hostname.endsWith(".ts.net");
+  const isLocalHttp = url.protocol === "http:" && ["localhost", "127.0.0.1"].includes(url.hostname);
+  if (
+    (!isTailnetHttps && !isLocalHttp) ||
+    url.pathname !== "/pair" ||
+    url.username ||
+    url.password ||
+    url.search
+  ) {
+    throw new Error("Pairing request did not come from a trusted Tailscale pairing page");
+  }
+  return url.origin;
+}
+
+function isTrustedPairingConfirmation(sender) {
+  if (sender?.id !== chrome.runtime.id || typeof sender?.url !== "string") return false;
+  try {
+    const url = new URL(sender.url);
+    return url.protocol === "chrome-extension:" &&
+      url.host === chrome.runtime.id &&
+      url.pathname === "/pair.html";
+  } catch {
+    return false;
+  }
+}
+
+async function openPairingConfirmation(message, sender) {
+  const endpoint = pairingEndpointFromSender(sender);
+  const code = validatePairingCode(message.code);
+  const confirmationUrl = chrome.runtime.getURL("pair.html") +
+    `#endpoint=${encodeURIComponent(endpoint)}&code=${encodeURIComponent(code)}`;
+  await chrome.tabs.create({ url: confirmationUrl });
+  return { accepted: true };
+}
+
 async function readBrokerResponse(response) {
   const text = await response.text();
   if (!text) return null;
@@ -121,6 +172,34 @@ async function readBrokerResponse(response) {
     return JSON.parse(text);
   } catch {
     throw new Error("Broker returned an invalid response");
+  }
+}
+
+async function exchangePairingCode(endpointValue, codeValue) {
+  const endpoint = normalizeBrokerEndpoint(endpointValue);
+  const code = validatePairingCode(codeValue);
+  const controller = new AbortController();
+  const timeout = setTimeout(() => controller.abort(), BROKER_TIMEOUT_MS);
+
+  try {
+    const response = await fetch(`${endpoint}/v1/pairings/exchange`, {
+      method: "POST",
+      headers: {
+        Accept: "application/json",
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify({ code }),
+      signal: controller.signal,
+    });
+    const body = await readBrokerResponse(response);
+    if (!response.ok) {
+      throw new Error(boundedMessage(body?.error?.message, `Broker returned HTTP ${response.status}`));
+    }
+    const token = validateToken(body?.token);
+    await saveBrokerConfig({ endpoint, token });
+    return { connected: true, endpoint };
+  } finally {
+    clearTimeout(timeout);
   }
 }
 
@@ -264,6 +343,14 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
     case "SAVE_BROKER_CONFIG":
       return runMessageTask(() => saveBrokerConfig(message), sendResponse);
 
+    case "COMPLETE_PAIRING":
+      return runMessageTask(() => {
+        if (!isTrustedPairingConfirmation(sender)) {
+          throw new Error("Pairing must be completed from the trusted pairing page");
+        }
+        return exchangePairingCode(message.endpoint, message.code);
+      }, sendResponse);
+
     case "LIST_SESSIONS":
       return runMessageTask(listSessions, sendResponse);
 
@@ -290,6 +377,11 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
     default:
       return false;
   }
+});
+
+chrome.runtime.onMessageExternal.addListener((message, sender, sendResponse) => {
+  if (message?.type !== "PI_ANNOTATE_PAIR") return false;
+  return runMessageTask(() => openPairingConfirmation(message, sender), sendResponse);
 });
 
 chrome.commands.onCommand.addListener((command) => {

@@ -1,13 +1,22 @@
-import { randomUUID, timingSafeEqual } from "node:crypto";
+import { randomBytes, randomUUID, timingSafeEqual } from "node:crypto";
 import fs from "node:fs";
 import http from "node:http";
 import net from "node:net";
 import path from "node:path";
+import {
+  ANNOTATOR_EXTENSION_ORIGIN,
+  DEFAULT_PAIRING_CODE_TTL_MS,
+  PAIRING_CODE_PATTERN,
+  pairingPageHtml,
+} from "./pairing.js";
+import { BROKER_PROTOCOL_VERSION } from "./protocol.js";
 
 export const DEFAULT_MAX_BODY_BYTES = 32 * 1024 * 1024;
 export const DEFAULT_DELIVERY_TIMEOUT_MS = 10_000;
 const MAX_IPC_LINE_BYTES = 64 * 1024;
 const MAX_LABEL_LENGTH = 200;
+const MAX_PAIRING_BODY_BYTES = 4 * 1024;
+const MAX_ACTIVE_PAIRING_CODES = 32;
 
 class BrokerError extends Error {
   constructor(status, code, message) {
@@ -29,6 +38,19 @@ function writeJson(response, status, value, extraHeaders = {}) {
     "Content-Length": Buffer.byteLength(body),
     "Cache-Control": "no-store",
     ...extraHeaders,
+  });
+  response.end(body);
+}
+
+function writePairingPage(response) {
+  const body = pairingPageHtml();
+  response.writeHead(200, {
+    "Content-Type": "text/html; charset=utf-8",
+    "Content-Length": Buffer.byteLength(body),
+    "Cache-Control": "no-store",
+    "Content-Security-Policy": "default-src 'none'; script-src 'unsafe-inline'; style-src 'unsafe-inline'; base-uri 'none'; frame-ancestors 'none'; form-action 'none'",
+    "Referrer-Policy": "no-referrer",
+    "X-Content-Type-Options": "nosniff",
   });
   response.end(body);
 }
@@ -109,12 +131,49 @@ export function createBroker(options) {
   const port = options.port ?? 32179;
   const maxBodyBytes = options.maxBodyBytes ?? DEFAULT_MAX_BODY_BYTES;
   const deliveryTimeoutMs = options.deliveryTimeoutMs ?? DEFAULT_DELIVERY_TIMEOUT_MS;
+  const pairingCodeTtlMs = options.pairingCodeTtlMs ?? DEFAULT_PAIRING_CODE_TTL_MS;
+  const now = options.now || Date.now;
   const configuredOrigins = options.allowedOrigins || [];
+  if (!Number.isFinite(pairingCodeTtlMs) || pairingCodeTtlMs <= 0) {
+    throw new Error("pairingCodeTtlMs must be positive");
+  }
   const sessions = new Map();
   const socketSessions = new Map();
   const allSockets = new Set();
   const pendingDeliveries = new Map();
+  const pairingCodes = new Map();
   let started = false;
+
+  function prunePairingCodes() {
+    const currentTime = now();
+    for (const [code, expiresAt] of pairingCodes) {
+      if (expiresAt <= currentTime) pairingCodes.delete(code);
+    }
+  }
+
+  function issuePairingCode() {
+    prunePairingCodes();
+    while (pairingCodes.size >= MAX_ACTIVE_PAIRING_CODES) {
+      pairingCodes.delete(pairingCodes.keys().next().value);
+    }
+
+    let code;
+    do {
+      code = randomBytes(32).toString("base64url");
+    } while (pairingCodes.has(code));
+    const expiresAt = now() + pairingCodeTtlMs;
+    pairingCodes.set(code, expiresAt);
+    return { code, expiresAt };
+  }
+
+  function exchangePairingCode(code) {
+    prunePairingCodes();
+    if (typeof code !== "string" || !PAIRING_CODE_PATTERN.test(code) || !pairingCodes.has(code)) {
+      throw new BrokerError(401, "invalid_pairing_code", "Pairing code is invalid or expired");
+    }
+    pairingCodes.delete(code);
+    return options.token;
+  }
 
   function sendIpc(socket, message) {
     if (socket.destroyed || !socket.writable) return false;
@@ -254,7 +313,22 @@ export function createBroker(options) {
 
       const url = new URL(request.url || "/", `http://${request.headers.host || "localhost"}`);
       if (request.method === "GET" && url.pathname === "/health") {
-        writeJson(response, 200, { ok: true }, headers);
+        writeJson(response, 200, { ok: true, protocolVersion: BROKER_PROTOCOL_VERSION }, headers);
+        return;
+      }
+
+      if (request.method === "GET" && url.pathname === "/pair") {
+        writePairingPage(response);
+        return;
+      }
+
+      if (request.method === "POST" && url.pathname === "/v1/pairings/exchange") {
+        if (request.headers.origin !== ANNOTATOR_EXTENSION_ORIGIN) {
+          throw new BrokerError(403, "pairing_origin_not_allowed", "Pairing must be completed by Pi Annotate");
+        }
+        const body = await readJsonBody(request, MAX_PAIRING_BODY_BYTES);
+        const token = exchangePairingCode(body.code);
+        writeJson(response, 200, { token }, headers);
         return;
       }
 
@@ -263,6 +337,11 @@ export function createBroker(options) {
           ...headers,
           "WWW-Authenticate": "Bearer",
         });
+        return;
+      }
+
+      if (request.method === "POST" && url.pathname === "/v1/pairings") {
+        writeJson(response, 201, issuePairingCode(), headers);
         return;
       }
 
@@ -354,6 +433,7 @@ export function createBroker(options) {
       pending.reject(new BrokerError(503, "broker_stopped", "Broker stopped"));
     }
     pendingDeliveries.clear();
+    pairingCodes.clear();
     httpServer.closeAllConnections?.();
     await Promise.all([
       new Promise((resolve) => ipcServer.close(resolve)),

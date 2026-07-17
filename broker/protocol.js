@@ -1,0 +1,1 @@
+export const BROKER_PROTOCOL_VERSION = 2;

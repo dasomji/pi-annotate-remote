@@ -8,6 +8,7 @@ import * as os from "node:os";
 import { fileURLToPath } from "node:url";
 import { AnnotationSessionClient, ensureBrokerRunning } from "./broker/client.js";
 import { getBrokerConfig } from "./broker/config.js";
+import { createPairingLink } from "./broker/pairing.js";
 import { ensureTailscaleServe } from "./broker/tailscale.js";
 import type { AnnotationResult, ElementSelection, EditCapture } from "./types.js";
 
@@ -46,18 +47,35 @@ export function formatSetupInstructions({
   sessionLabel,
   token,
   serve,
+  pairingLink,
+  pairingWarning,
 }: {
   sessionLabel: string;
   token: string;
   serve: TailscaleServeInfo;
+  pairingLink?: string;
+  pairingWarning?: string;
 }): string {
   const lines = [
     `Annotation session available as ${sessionLabel}`,
     "",
-    "Configure the browser extension with:",
+  ];
+
+  if (pairingLink) {
+    lines.push(
+      "Pairing link (expires in 5 minutes):",
+      pairingLink,
+      "",
+      "Manual fallback:",
+    );
+  } else {
+    lines.push("Configure the browser extension manually:");
+  }
+  lines.push(
     `Endpoint: ${serve.endpoint || "unavailable"}`,
     `Token: ${token}`,
-  ];
+  );
+  if (pairingWarning) lines.push(`Pairing link warning: ${pairingWarning}`);
 
   if (serve.active && serve.endpoint) {
     lines.push("", `Tailscale Serve: active (${serve.endpoint} → ${serve.localEndpoint})`);
@@ -71,6 +89,35 @@ export function formatSetupInstructions({
   }
 
   return lines.join("\n");
+}
+
+export async function createSetupInstructions({
+  sessionLabel,
+  token,
+  serve,
+  createLink = createPairingLink,
+}: {
+  sessionLabel: string;
+  token: string;
+  serve: TailscaleServeInfo;
+  createLink?: typeof createPairingLink;
+}): Promise<string> {
+  let pairingLink: string | undefined;
+  let pairingWarning: string | undefined;
+  if (serve.active && serve.endpoint) {
+    try {
+      pairingLink = await createLink({
+        localEndpoint: serve.localEndpoint,
+        publicEndpoint: serve.endpoint,
+        token,
+      });
+    } catch (error) {
+      pairingWarning = (error instanceof Error ? error.message : String(error))
+        .replace(/[\r\n\t]+/g, " ")
+        .slice(0, 300);
+    }
+  }
+  return formatSetupInstructions({ sessionLabel, token, serve, pairingLink, pairingWarning });
 }
 
 function gitBranch(cwd: string): string {
@@ -174,7 +221,7 @@ export default function (pi: ExtensionAPI) {
 
     try {
       const enabled = await enableAnnotationSession(ctx, { refreshServe: action === "setup" });
-      ctx.ui?.notify?.(formatSetupInstructions({
+      ctx.ui?.notify?.(await createSetupInstructions({
         sessionLabel,
         token: enabled.token,
         serve: enabled.serve,
@@ -477,7 +524,7 @@ export default function (pi: ExtensionAPI) {
       try {
         const enabled = await enableAnnotationSession(ctx);
         if (!setupShown && ctx.hasUI) {
-          ctx.ui.notify(formatSetupInstructions({
+          ctx.ui.notify(await createSetupInstructions({
             sessionLabel,
             token: enabled.token,
             serve: enabled.serve,

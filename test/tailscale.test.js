@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import { ensureTailscaleServe } from "../broker/tailscale.js";
-import { formatSetupInstructions } from "../index.ts";
+import { createSetupInstructions, formatSetupInstructions } from "../index.ts";
 
 const LOCAL_ENDPOINT = "http://127.0.0.1:32179";
 const DNS_NAME = "workstation.example.ts.net";
@@ -202,5 +202,33 @@ test("setup information prints the verified endpoint instead of a placeholder", 
 
   assert.match(output, new RegExp(`Endpoint: ${TAILNET_ENDPOINT.replaceAll(".", "\\.")}`));
   assert.doesNotMatch(output, /your Tailscale Serve HTTPS URL/);
+  assert.match(output, /Token: secret-token/);
+});
+
+test("setup information creates a short-lived browser pairing link with manual fallback", async () => {
+  const calls = [];
+  const pairingLink = `${TAILNET_ENDPOINT}/pair#${"a".repeat(43)}`;
+  const output = await createSetupInstructions({
+    sessionLabel: "shop (main)",
+    token: "secret-token",
+    serve: {
+      endpoint: TAILNET_ENDPOINT,
+      localEndpoint: LOCAL_ENDPOINT,
+      active: true,
+    },
+    createLink: async (options) => {
+      calls.push(options);
+      return pairingLink;
+    },
+  });
+
+  assert.deepEqual(calls, [{
+    localEndpoint: LOCAL_ENDPOINT,
+    publicEndpoint: TAILNET_ENDPOINT,
+    token: "secret-token",
+  }]);
+  assert.match(output, /Pairing link \(expires in 5 minutes\):/);
+  assert.match(output, new RegExp(pairingLink.replaceAll(".", "\\.")));
+  assert.match(output, /Manual fallback:/);
   assert.match(output, /Token: secret-token/);
 });

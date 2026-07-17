@@ -5,10 +5,12 @@ All notable changes to Pi Annotate.
 ## [Unreleased]
 
 ### Breaking
-- Replaced the same-machine Native Messaging transport with a broker-only HTTPS flow. Existing browser installations must reload the unpacked extension, configure a Tailscale Serve endpoint and token, and grant endpoint-scoped host access.
+- Replaced the same-machine Native Messaging transport with a broker-only HTTPS flow. Existing browser installations must load the broker-based extension, connect it to a Tailscale Serve endpoint, and grant endpoint-scoped host access.
+- Pinned a stable unpacked-extension ID for secure pairing-page handoff. Existing unpacked installations must remove the old extension once, load the new copy, and pair again because Chrome treats it as a new identity.
 - `/annotate` now makes the current Pi session available to the browser instead of opening a URL and waiting for one tool request. Browser submissions arrive as acknowledged user messages in the selected session.
 
 ### Added
+- Five-minute tailnet pairing links that hand a one-time, memory-only code to the pinned annotator, show an extension-owned broker confirmation, request hostname-scoped permission from a user gesture, and exchange the code for the bearer token exactly once.
 - Busy Pi sessions now accept browser annotations into Pi's native follow-up queue, allowing multiple annotations to be submitted without waiting for the current agent run to finish.
 - Conflict-safe automatic Tailscale Serve setup on the broker port, with verified MagicDNS endpoint discovery, idempotent route reuse, bounded warnings, and `PI_ANNOTATE_TAILSCALE=off` as an opt-out.
 - Shared detached localhost broker with bearer authentication, private XDG-aware state, bounded requests, local IPC session registration, reconnects, exact opaque-session routing, delivery acknowledgements, and timeouts.
@@ -20,13 +22,16 @@ All notable changes to Pi Annotate.
 - Automated broker, service-worker, popup, content delivery, and interaction-state tests.
 
 ### Changed
-- `/annotate` now prints the exact verified HTTPS endpoint and bearer token every time; `/annotate setup` forces a fresh Tailscale Serve check.
+- `/annotate` now prints a fresh pairing link when Tailscale Serve is active, followed by the exact verified HTTPS endpoint and bearer token as a manual fallback; `/annotate setup` forces a fresh Serve check and pairing code.
+- Broker health now reports a protocol version so Pi can replace an incompatible detached broker automatically while annotation sessions reconnect.
 - Multi-select is the default for every new annotation session; Single remains available in the toolbar.
 - Content scripts are injected only into the active tab after an explicit popup or keyboard action.
 - Broker host permission is optional and requested for only the configured hostname. Remote brokers require HTTPS; localhost HTTP remains available for development.
 - Pi sessions are labelled with project directory and Git branch while routing uses a random opaque ID.
 
 ### Security
+- Kept long-lived bearer tokens out of pairing URLs by placing only one-time codes in fragments that are never sent in the initial HTTP request.
+- Restricted pairing exchange to the pinned extension origin and derived the broker endpoint from the browser-provided sender URL rather than external message data.
 - Restricted the saved bearer token to trusted extension contexts.
 - Kept the broker on `127.0.0.1` by default and exposed only bounded `{id, label}` session metadata.
 - Removed persistent `<all_urls>` host permission and ensured broker requests originate only from the extension service worker.

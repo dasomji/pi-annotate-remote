@@ -27,3 +27,11 @@ _Avoid_: Session label
 **Annotator**:
 The browser extension and in-page interface used to create and submit an annotation.
 _Avoid_: Chrome plugin, picker
+
+**Pairing link**:
+A short-lived tailnet HTTPS URL that asks the annotator to connect to one broker. It carries a pairing code in its fragment, never the bearer token.
+_Avoid_: Login link, token URL
+
+**Pairing code**:
+A one-time, memory-only secret that the broker exchanges for its bearer token after the user confirms the pairing link in the annotator.
+_Avoid_: Bearer token, password

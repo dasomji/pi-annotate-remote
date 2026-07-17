@@ -43,7 +43,18 @@ pi install git:github.com/dasomji/pi-annotate-remote
 
 Restart Pi after installation.
 
-### 2. Make a Pi session available
+### 2. Load the browser extension
+
+1. Open `chrome://extensions` in Google Chrome or Chromium.
+2. Enable **Developer mode**.
+3. Click **Load unpacked** and select this package's `chrome-extension/` directory.
+   - Git installs normally place it at `~/.pi/agent/git/github.com/dasomji/pi-annotate-remote/chrome-extension/`.
+   - Local installs use the `chrome-extension/` directory in that checkout.
+4. Pin **Pi Annotate** to the toolbar.
+
+The manifest pins a stable unpacked-extension ID so a broker pairing page can address the annotator. If you loaded an older Pi Annotate build before this identity was pinned, remove that old extension once before loading the new directory. Chrome treats it as a different extension, so its saved broker configuration does not migrate.
+
+### 3. Make a Pi session available
 
 In the project session you want to annotate, run:
 
@@ -53,8 +64,8 @@ In the project session you want to annotate, run:
 
 Every invocation starts or reconnects the shared localhost broker, configures Tailscale Serve when needed, and prints:
 
-- the exact HTTPS endpoint to paste into the browser popup;
-- the bearer token;
+- a pairing link that expires after five minutes;
+- the exact HTTPS endpoint and bearer token as a manual fallback;
 - the verified Serve route to the local broker.
 
 The default local broker is `http://127.0.0.1:32179`. Pi Annotate exposes it on the same tailnet HTTPS port, producing an endpoint such as:
@@ -67,32 +78,26 @@ Automatic setup is idempotent: an existing matching route is reused, and an unre
 
 Tailscale Serve keeps the broker available only on your tailnet. Do **not** enable Tailscale Funnel for this service. See the [Tailscale Serve documentation](https://tailscale.com/docs/features/tailscale-serve) for machine and tailnet setup.
 
-### 3. Load the browser extension
-
-1. Open `chrome://extensions` in Google Chrome or Chromium.
-2. Enable **Developer mode**.
-3. Click **Load unpacked** and select this package's `chrome-extension/` directory.
-   - Git installs normally place it at `~/.pi/agent/git/github.com/dasomji/pi-annotate-remote/chrome-extension/`.
-   - Local installs use the `chrome-extension/` directory in that checkout.
-4. Pin **Pi Annotate** to the toolbar.
-
 ### 4. Pair the browser and choose a session
 
-1. Open the Pi Annotate popup.
-2. Paste the exact HTTPS endpoint printed by `/annotate`.
-3. Paste the token printed alongside it.
-4. Click **Save & connect** and approve access to that broker host.
-5. Select a live Pi session and click **Start annotation**.
+1. Open the pairing link from `/annotate` in the desktop Chrome or Chromium profile where Pi Annotate is loaded.
+2. Pi Annotate opens its own confirmation page. Verify the exact broker origin, then click **Connect**.
+3. Approve Chrome's request for access to that broker host.
+4. Open the Pi Annotate popup, select a live annotation session, and click **Start annotation**.
 
-The extension requests optional network access only for the configured host. `http://localhost` and `http://127.0.0.1` are accepted for local development; remote endpoints must use HTTPS.
+The link contains a one-time pairing code in its URL fragment, not the bearer token. The code is removed from the visible tailnet page immediately, can be exchanged only once, and expires after five minutes. If the link expires or was already used, run `/annotate setup` to create another.
+
+For manual recovery, paste the endpoint and token printed under **Manual fallback** into the popup, click **Save & connect**, and approve host access. The extension requests optional network access only for the selected hostname. `http://localhost` and `http://127.0.0.1` are accepted for local development; remote endpoints must use HTTPS.
+
+Desktop Chrome and Chromium support this extension flow. Chrome on iOS and Android does not support desktop Chrome extensions, so opening the link there cannot connect Pi Annotate; use a desktop extension-capable browser on the tailnet.
 
 ## Pi commands
 
 | Command | Effect |
 |---|---|
-| `/annotate` or `/annotate on` | Make the session available, ensure Tailscale Serve, and print the exact endpoint and token |
+| `/annotate` or `/annotate on` | Make the session available, ensure Tailscale Serve, and print a fresh pairing link plus manual setup values |
 | `/annotate status` | Report whether this session is registered and show its known endpoint |
-| `/annotate setup` | Re-check Tailscale Serve and print the endpoint and token again |
+| `/annotate setup` | Re-check Tailscale Serve and print a fresh pairing link plus manual setup values |
 | `/annotate off` | Remove this session from the popup without stopping the shared broker |
 
 The `annotate` tool uses the same availability flow when Pi decides visual feedback is useful. Browser submissions arrive later as a user message in the selected Pi session; the tool does not hold an agent turn open while you annotate.
@@ -161,8 +166,10 @@ Example output:
 
 - The broker listens on `127.0.0.1` by default; Pi Annotate configures Tailscale Serve on the broker port to provide tailnet HTTPS.
 - Browser requests require a random bearer token stored in `chrome.storage.local` and restricted to trusted extension contexts.
+- Pairing links contain only a random 256-bit, memory-only code in the URL fragment. The code expires after five minutes, works once, and is exchanged for the token only after extension confirmation.
+- The pairing page addresses one pinned extension ID; the extension validates the page's browser-provided tailnet URL and derives the broker origin from it rather than trusting message data.
 - The token file is mode `0600`; runtime/state directories and local IPC are private to the user.
-- The popup requests optional host permission for only the configured broker hostname.
+- The popup and pairing confirmation request optional host permission for only the configured broker hostname.
 - Broker responses expose session `{id, label}` only, not absolute paths or transcript data.
 - Request bodies, local IPC messages, and browser responses are bounded.
 - Screenshot payloads and credentials are never logged by the broker or service worker.
@@ -185,11 +192,13 @@ Advanced overrides: `PI_ANNOTATE_PORT`, `PI_ANNOTATE_RUNTIME_DIR`, `PI_ANNOTATE_
 | `index.ts` | Pi command/tool registration, session label, result formatting |
 | `types.ts` | Annotation data interfaces |
 | `broker/daemon.js` | Detached shared broker lifecycle |
-| `broker/server.js` | HTTP API, authentication, CORS, routing, acknowledgements |
-| `broker/client.js` | Pi session registration and reconnecting local IPC client |
+| `broker/server.js` | HTTP API, authentication, pairing, routing, acknowledgements |
+| `broker/client.js` | Pi session registration, protocol upgrades, and reconnecting local IPC client |
+| `broker/pairing.js` | Pairing-link creation, stable annotator identity, and tailnet handoff page |
 | `broker/tailscale.js` | Conflict-safe automatic Tailscale Serve setup and endpoint discovery |
-| `chrome-extension/background.js` | Credential storage, broker requests, screenshots, tab injection |
-| `chrome-extension/popup.html` / `popup.js` | Broker setup and live session selection |
+| `chrome-extension/background.js` | Credential storage, broker requests, pairing exchange, screenshots, tab injection |
+| `chrome-extension/pair.html` / `pair.js` | Trusted broker confirmation and host-permission request |
+| `chrome-extension/popup.html` / `popup.js` | Manual broker setup and live session selection |
 | `chrome-extension/content.js` | Element picker and annotation UI |
 
 There is no Native Messaging host and no build step.
@@ -205,7 +214,7 @@ npm pack --dry-run
 
 Reload the unpacked extension at `chrome://extensions` after changing browser files. Restart or reload Pi after changing `index.ts`.
 
-The broker is detached and shared by Pi sessions. During broker development, stop the current daemon using the PID in `broker.lock`; the next `/annotate` invocation starts the updated code:
+The broker is detached and shared by Pi sessions. A protocol-version change replaces an older broker automatically. For ordinary broker changes that keep the same protocol version, stop the current process using the PID in `broker.lock`; the next `/annotate` invocation starts the updated code:
 
 ```bash
 RUNTIME_DIR="${PI_ANNOTATE_RUNTIME_DIR:-${XDG_RUNTIME_DIR:+$XDG_RUNTIME_DIR/pi-annotate}}"
@@ -220,14 +229,16 @@ kill "$(cat "$RUNTIME_DIR/broker.lock")"
 | Popup says no sessions are available | Run `/annotate` in the target Pi session, then click **Refresh** |
 | `/annotate` reports a Tailscale warning | Resolve the reported connectivity, HTTPS-consent, or port-conflict condition, then run `/annotate setup` |
 | Broker cannot be reached | Copy the exact endpoint printed by `/annotate`; check `tailscale status` and `tailscale serve status --json` |
-| Access was not granted | Click **Save & connect** again and approve the browser's host-access prompt |
-| Authentication fails | Run `/annotate setup` and paste the current token again |
+| Access was not granted | Click **Connect** on the pairing confirmation again (or **Save & connect** for manual setup) and approve the host-access prompt |
+| Pairing link says Pi Annotate was not found | Load or reload the pinned extension in desktop Chrome, then run `/annotate setup` and open the new link in that browser profile |
+| Pairing code is invalid or expired | Run `/annotate setup` and use the new link within five minutes |
+| Authentication fails | Run `/annotate setup` and pair again, or paste the current manual fallback token |
 | Delivery fails after annotation | Keep the UI open, refresh the popup session list if needed, then click **Retry** |
 | UI does not appear | Open a normal `http://` or `https://` page; browser-internal and extension pages cannot be annotated |
 | Broker code did not update | Stop the detached broker using the development command above, then run `/annotate` |
 | Browser and Pi are on the same machine | Use `http://127.0.0.1:32179` in the popup; HTTPS is still required for non-local hosts |
 
-The public `GET /health` endpoint returns only broker health. Session listing and delivery require the bearer token.
+The public `GET /health` endpoint returns only broker health and protocol version. Session listing and delivery require the bearer token.
 
 ## Credits
 
