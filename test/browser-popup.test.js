@@ -59,6 +59,7 @@ function createPopupHarness({
   selectedSessionId = "",
   recommendedSessionId = "",
   baseOrigin = "https://shop.example.test",
+  settingsRequested = false,
 } = {}) {
   const ids = [
     "broker-endpoint", "broker-token", "broker-form", "save-btn", "toggle-token",
@@ -126,6 +127,7 @@ function createPopupHarness({
     createElement(tagName) { return new PopupElement(tagName); },
   };
   const window = {
+    location: { search: settingsRequested ? "?settings=1" : "" },
     addEventListener(type, listener) { windowListeners.set(type, listener); },
     close() { closed = true; },
   };
@@ -186,6 +188,14 @@ test("connected picker hides settings, recommends by origin, and starts the chos
   const startMessage = harness.messages.find((message) => message.type === "START_ANNOTATION");
   assert.deepEqual(startMessage, { type: "START_ANNOTATION", sessionId: recommended });
   assert.equal(harness.wasClosed(), true);
+});
+
+test("settings fallback opens its settings panel even when already configured", async () => {
+  const harness = createPopupHarness({ configured: true, settingsRequested: true });
+  await flushAsync();
+
+  assert.equal(harness.elements.get("settings-panel").classList.contains("hidden"), false);
+  assert.equal(harness.elements.get("settings-btn").getAttribute("aria-expanded"), "true");
 });
 
 test("unconfigured picker exposes connection and Chrome-managed shortcut settings", async () => {

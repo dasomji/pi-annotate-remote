@@ -15,20 +15,20 @@ All notable changes to Pi Annotate.
 - Conflict-safe automatic Tailscale Serve setup on the broker port, with verified MagicDNS endpoint discovery, idempotent route reuse, bounded warnings, and `PI_ANNOTATE_TAILSCALE=off` as an opt-out.
 - Shared detached localhost broker with bearer authentication, private XDG-aware state, bounded requests, local IPC session registration, reconnects, exact opaque-session routing, delivery acknowledgements, and timeouts.
 - `/annotate on`, `/annotate off`, `/annotate status`, and `/annotate setup` lifecycle controls.
-- Centered live-session picker with radio options, circular refresh action, connection settings behind a cog, loading/empty/error states, and active-page annotation start.
+- Centered in-page live-session chooser with radio options, circular refresh action, loading/empty/error states, focus trapping, and active-page annotation start; browser-owned pages and connection settings use a compact extension-window fallback.
 - Browser-local session recommendations keyed by page origin, with the last live session used for a site preselected and labelled in the picker.
 - Shortcut settings that show Chrome's active assignment and open `chrome://extensions/shortcuts` when it is missing or needs to change.
 - Draggable minimized annotation bubble with selection count and no reserved bottom-page space.
 - Accessible three-Escape abort confirmation flow; Escape no longer immediately discards annotation work.
 - Delivery retry state that preserves the content UI until the selected Pi session acknowledges receipt.
-- Automated broker, service-worker, popup, content delivery, and interaction-state tests.
+- Automated broker, service-worker, in-page chooser, fallback popup, content delivery, and interaction-state tests.
 
 ### Changed
 - `/annotate` now prints a fresh pairing link when Tailscale Serve is active, followed by the exact verified HTTPS endpoint and bearer token as a manual fallback; `/annotate setup` forces a fresh Serve check and pairing code.
 - Broker health now reports a protocol version so Pi can replace an incompatible detached broker automatically while annotation sessions reconnect.
 - Multi-select is the default for every new annotation session; Single remains available in the toolbar.
-- Toolbar and keyboard actions now open the same centered picker instead of having the shortcut silently start annotation with a saved session.
-- Content scripts are injected only into the picker’s remembered target tab after an explicit **Start annotation** action.
+- Toolbar and keyboard actions now open the same centered dialog over the current page instead of creating a large separate browser window or silently starting annotation with a saved session.
+- The annotation content script is injected only into the session chooser’s remembered target tab after an explicit **Start annotation** action; the separate chooser script contains no broker credentials.
 - The annotation bar is now a rounded floating box with 30px side margins, a 20px bottom margin, and a multiline general-context field.
 - Full screenshot mode is described accurately as the visible viewport rather than the entire scrollable page.
 - Broker host permission is optional and requested for only the configured hostname. Remote brokers require HTTPS; localhost HTTP remains available for development.
@@ -37,7 +37,7 @@ All notable changes to Pi Annotate.
 ### Security
 - Kept long-lived bearer tokens out of pairing URLs by placing only one-time codes in fragments that are never sent in the initial HTTP request.
 - Restricted pairing exchange to the pinned extension origin and derived the broker endpoint from the browser-provided sender URL rather than external message data.
-- Restricted the saved bearer token to trusted extension contexts.
+- Restricted the saved bearer token to trusted extension contexts; the in-page session chooser receives only a boolean connection status and routes privileged work through the service worker.
 - Kept the broker on `127.0.0.1` by default and exposed only bounded `{id, label}` session metadata.
 - Removed persistent `<all_urls>` host permission and ensured broker requests originate only from the extension service worker.
 

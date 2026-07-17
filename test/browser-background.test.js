@@ -33,6 +33,7 @@ function createHarness({
   targetTab = TARGET_TAB,
   failPositionedWindow = false,
   failSizedWindow = false,
+  pickerMessageFailures = 0,
 } = {}) {
   const storage = {};
   const sessionStorage = {};
@@ -41,6 +42,7 @@ function createHarness({
   const injected = [];
   const createdTabs = [];
   const createdWindows = [];
+  const removedWindows = [];
   const windowUpdates = [];
   const runtimeMessages = [];
   const windows = new Map();
@@ -127,11 +129,17 @@ function createHarness({
         return tab;
       },
       async sendMessage(tabId, message) {
+        if (message?.type === "OPEN_PICKER" && pickerMessageFailures > 0) {
+          pickerMessageFailures -= 1;
+          throw new Error("Receiving end does not exist");
+        }
         if (failFirstTabMessage) {
           failFirstTabMessage = false;
           throw new Error("Receiving end does not exist");
         }
         tabMessages.push(JSON.parse(JSON.stringify({ tabId, message })));
+        if (message?.type === "OPEN_PICKER") return { opened: true };
+        return undefined;
       },
       captureVisibleTab(_windowId, _options, callback) {
         callback("data:image/png;base64,abc");
@@ -172,6 +180,11 @@ function createHarness({
         Object.assign(window, options);
         windowUpdates.push({ windowId, ...JSON.parse(JSON.stringify(options)) });
         return JSON.parse(JSON.stringify(window));
+      },
+      async remove(windowId) {
+        if (!windows.has(windowId)) throw new Error("No window with id");
+        windows.delete(windowId);
+        removedWindows.push(windowId);
       },
       onRemoved: {
         addListener(listener) {
@@ -235,6 +248,7 @@ function createHarness({
     createdWindows,
     fetchCalls,
     injected,
+    removedWindows,
     runtimeMessages,
     send,
     sendExternal,
@@ -295,6 +309,14 @@ test("background stores broker config and lists only validated sessions", async 
   assert.equal(options.headers.Authorization, "Bearer secret-token");
 });
 
+test("in-page picker status never exposes broker credentials", async () => {
+  const harness = createHarness();
+  assert.deepEqual(await harness.send({ type: "GET_PICKER_STATUS" }), { configured: false });
+
+  await configure(harness);
+  assert.deepEqual(await harness.send({ type: "GET_PICKER_STATUS" }), { configured: true });
+});
+
 test("background rejects insecure remote endpoints", async () => {
   const harness = createHarness();
   const response = await harness.send({
@@ -306,56 +328,121 @@ test("background rejects insecure remote endpoints", async () => {
   assert.deepEqual(harness.storage, {});
 });
 
-test("toolbar action and keyboard command open one centered picker window", async () => {
+test("toolbar action and keyboard command open the picker as a dialog in the active page", async () => {
   const harness = createHarness();
 
   await harness.triggerAction();
-  assert.deepEqual(harness.createdWindows, [{
-    type: "popup",
-    url: `chrome-extension://${EXTENSION_ID}/popup.html`,
-    focused: true,
-    width: 460,
-    height: 640,
-    left: 470,
-    top: 180,
+  assert.deepEqual(harness.createdWindows, []);
+  assert.deepEqual(harness.tabMessages, [{
+    tabId: 7,
+    message: { type: "OPEN_PICKER" },
   }]);
   assert.deepEqual(harness.sessionStorage.pickerState, {
     targetTabId: 7,
     targetWindowId: 3,
     baseOrigin: "https://example.test",
-    windowId: 10,
-    pickerTabId: 8,
+    modalTabId: 7,
+    windowId: null,
+    pickerTabId: null,
   });
-  assert.deepEqual(harness.tabMessages, []);
 
   await harness.triggerCommand("toggle-picker");
+  assert.equal(harness.createdWindows.length, 0);
+  assert.deepEqual(harness.tabMessages.at(-1), {
+    tabId: 7,
+    message: { type: "OPEN_PICKER" },
+  });
+});
+
+test("picker dialog script is injected on demand", async () => {
+  const harness = createHarness({ pickerMessageFailures: 1 });
+
+  await harness.triggerAction();
+  assert.deepEqual(harness.injected, [{ target: { tabId: 7 }, files: ["picker.js"] }]);
+  assert.deepEqual(harness.tabMessages, [{ tabId: 7, message: { type: "OPEN_PICKER" } }]);
+  assert.deepEqual(harness.createdWindows, []);
+});
+
+test("uninjectable pages fall back to a smaller centered extension window", async () => {
+  const harness = createHarness({ pickerMessageFailures: 2 });
+
+  await harness.triggerAction();
+  assert.deepEqual(harness.createdWindows, [{
+    type: "popup",
+    url: `chrome-extension://${EXTENSION_ID}/popup.html`,
+    focused: true,
+    width: 420,
+    height: 560,
+    left: 490,
+    top: 220,
+  }]);
+});
+
+test("repeated fallback opens reuse the existing compact window", async () => {
+  const harness = createHarness({ pickerMessageFailures: 4 });
+
+  await harness.triggerAction();
+  await harness.triggerAction();
+
   assert.equal(harness.createdWindows.length, 1);
   assert.deepEqual(harness.windowUpdates.at(-1), { windowId: 10, focused: true });
-  assert.deepEqual(harness.runtimeMessages.at(-1), { type: "PICKER_CONTEXT_UPDATED" });
 });
 
-test("picker still opens when Chrome rejects the calculated centered bounds", async () => {
-  const harness = createHarness({ failPositionedWindow: true });
+test("opening an in-page dialog closes a previous fallback window", async () => {
+  const harness = createHarness({ pickerMessageFailures: 2 });
+
+  await harness.triggerAction();
+  assert.equal(harness.createdWindows.length, 1);
+  await harness.triggerAction();
+
+  assert.deepEqual(harness.removedWindows, [10]);
+  assert.deepEqual(harness.tabMessages.at(-1), { tabId: 7, message: { type: "OPEN_PICKER" } });
+  assert.equal(harness.sessionStorage.pickerState.modalTabId, 7);
+  assert.equal(harness.sessionStorage.pickerState.windowId, null);
+});
+
+test("fallback window still opens when Chrome rejects the calculated centered bounds", async () => {
+  const harness = createHarness({ pickerMessageFailures: 2, failPositionedWindow: true });
 
   await harness.triggerAction();
   assert.deepEqual(harness.createdWindows, [{
     type: "popup",
     url: `chrome-extension://${EXTENSION_ID}/popup.html`,
     focused: true,
-    width: 460,
-    height: 640,
+    width: 420,
+    height: 560,
   }]);
 });
 
-test("picker falls back to browser sizing when the display rejects every explicit bound", async () => {
+test("fallback never asks Chrome for a near-full browser-sized window", async () => {
+  const harness = createHarness({
+    pickerMessageFailures: 2,
+    failPositionedWindow: true,
+    failSizedWindow: true,
+  });
+
+  await harness.triggerAction();
+  assert.deepEqual(harness.createdWindows, []);
+});
+
+test("in-page connection settings open the compact fallback directly on its settings panel", async () => {
+  const harness = createHarness();
+  const response = await harness.send({ type: "OPEN_PICKER_SETTINGS" }, { tab: TARGET_TAB });
+
+  assert.equal(response.windowId, 10);
+  assert.equal(harness.createdWindows[0].url, `chrome-extension://${EXTENSION_ID}/popup.html?settings=1`);
+  assert.equal(harness.createdWindows[0].width, 420);
+  assert.equal(harness.createdWindows[0].height, 560);
+});
+
+test("a settings-window failure leaves the in-page chooser open", async () => {
   const harness = createHarness({ failPositionedWindow: true, failSizedWindow: true });
-
   await harness.triggerAction();
-  assert.deepEqual(harness.createdWindows, [{
-    type: "popup",
-    url: `chrome-extension://${EXTENSION_ID}/popup.html`,
-    focused: true,
-  }]);
+
+  const response = await harness.send({ type: "OPEN_PICKER_SETTINGS" }, { tab: TARGET_TAB });
+
+  assert.match(response.error, /Invalid value for bounds/);
+  assert.deepEqual(harness.tabMessages, [{ tabId: 7, message: { type: "OPEN_PICKER" } }]);
 });
 
 test("shortcut settings open in the normal browser window", async () => {
@@ -384,10 +471,13 @@ test("starting annotation targets the remembered page and records its origin rec
   });
   assert.deepEqual(response, { started: true, baseOrigin: "https://example.test" });
   assert.deepEqual(harness.injected, [{ target: { tabId: 7 }, files: ["content.js"] }]);
-  assert.deepEqual(harness.tabMessages, [{
-    tabId: 7,
-    message: { type: "START_ANNOTATION", sessionId: "session_abcdefghijkl" },
-  }]);
+  assert.deepEqual(harness.tabMessages, [
+    { tabId: 7, message: { type: "OPEN_PICKER" } },
+    {
+      tabId: 7,
+      message: { type: "START_ANNOTATION", sessionId: "session_abcdefghijkl" },
+    },
+  ]);
   assert.equal(harness.storage.selectedSessionId, "session_abcdefghijkl");
   assert.equal(
     harness.storage.sessionRecommendationsByOrigin["https://example.test"].sessionId,

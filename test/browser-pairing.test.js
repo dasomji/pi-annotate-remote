@@ -90,7 +90,7 @@ test("manifest pins a stable extension ID and accepts pairing messages only from
     ],
   });
   assert.equal(manifest.action.default_popup, undefined);
-  assert.match(manifest.commands["toggle-picker"].description, /Open the Pi Annotate session picker/);
+  assert.match(manifest.commands["toggle-picker"].description, /Open the Pi Annotate session chooser/);
 });
 
 test("pairing confirmation requests access to only the broker host and completes pairing", async () => {

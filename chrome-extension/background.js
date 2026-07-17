@@ -1,8 +1,8 @@
 /**
  * Pi Annotate - Background Service Worker
  *
- * Owns the centered picker window, broker credentials, recommendations, and
- * network requests. Picker and content scripts use runtime messages.
+ * Owns the in-page session picker, compact fallback window, broker credentials,
+ * recommendations, and network requests. Picker and content scripts use runtime messages.
  */
 
 const STORAGE_KEYS = ["brokerEndpoint", "brokerToken", "selectedSessionId"];
@@ -12,8 +12,8 @@ const BROKER_TIMEOUT_MS = 20_000;
 const MAX_ERROR_LENGTH = 300;
 const MAX_SESSION_COUNT = 1_000;
 const MAX_RECOMMENDATIONS = 100;
-const PICKER_WIDTH = 460;
-const PICKER_HEIGHT = 640;
+const PICKER_WIDTH = 420;
+const PICKER_HEIGHT = 560;
 const PAIRING_CODE_PATTERN = /^[A-Za-z0-9_-]{43}$/;
 let pickerStateFallback = {};
 
@@ -386,17 +386,61 @@ async function notifyPickerContextChanged() {
   }
 }
 
-async function openPickerWindow(tabHint) {
-  const normalWindow = await getLastFocusedNormalWindow();
+async function pickerTarget(tabHint, normalWindowHint) {
+  const normalWindow = normalWindowHint || await getLastFocusedNormalWindow();
   let targetTab = tabHint?.id ? tabHint : activeTabInWindow(normalWindow);
   if (!targetTab && normalWindow?.id) targetTab = await queryActiveTab(normalWindow.id);
+  return { normalWindow, targetTab };
+}
 
-  const state = await updatePickerState({
+async function rememberPickerTarget(targetTab, normalWindow, surface) {
+  return updatePickerState({
     targetTabId: targetTab?.id || null,
     targetWindowId: targetTab?.windowId || normalWindow?.id || null,
     baseOrigin: pageOrigin(targetTab?.url),
+    modalTabId: surface === "modal" ? targetTab?.id || null : null,
   });
-  const popupUrl = chrome.runtime.getURL("popup.html");
+}
+
+async function showPickerInTab(tabId) {
+  try {
+    const response = await chrome.tabs.sendMessage(tabId, { type: "OPEN_PICKER" });
+    if (response?.opened === true) return;
+  } catch {
+    // The picker content script has not been injected into this document yet.
+  }
+
+  await chrome.scripting.executeScript({
+    target: { tabId },
+    files: ["picker.js"],
+  });
+  const response = await chrome.tabs.sendMessage(tabId, { type: "OPEN_PICKER" });
+  if (response?.opened !== true) throw new Error("Pi Annotate could not open the in-page picker");
+}
+
+async function closePreviousPickerModal(state, nextTabId) {
+  if (!Number.isInteger(state?.modalTabId) || state.modalTabId === nextTabId) return;
+  try {
+    await chrome.tabs.sendMessage(state.modalTabId, { type: "CLOSE_PICKER" });
+  } catch {
+    // The previous page was closed or navigated.
+  }
+}
+
+async function closePreviousPickerWindow(state) {
+  if (!Number.isInteger(state?.windowId)) return;
+  try {
+    await chrome.windows.remove(state.windowId);
+  } catch {
+    // The fallback window was already closed.
+  }
+}
+
+async function openPickerWindow(tabHint, normalWindowHint, openSettings = false) {
+  const { normalWindow, targetTab } = await pickerTarget(tabHint, normalWindowHint);
+  const previousState = await getPickerState();
+  const state = await rememberPickerTarget(targetTab, normalWindow, "window");
+  const popupUrl = chrome.runtime.getURL(`popup.html${openSettings ? "?settings=1" : ""}`);
 
   if (Number.isInteger(state.windowId) && Number.isInteger(state.pickerTabId)) {
     try {
@@ -406,6 +450,14 @@ async function openPickerWindow(tabHint) {
       if (isPicker) {
         await chrome.windows.update(state.windowId, { focused: true });
         await notifyPickerContextChanged();
+        if (openSettings) {
+          try {
+            await chrome.runtime.sendMessage({ type: "OPEN_PICKER_SETTINGS_PANEL" });
+          } catch {
+            // The fallback page may still be loading; its query string handles first open.
+          }
+        }
+        await closePreviousPickerModal(previousState);
         return { windowId: state.windowId, reused: true };
       }
     } catch {
@@ -436,26 +488,37 @@ async function openPickerWindow(tabHint) {
     const unpositionedOptions = { ...createOptions };
     delete unpositionedOptions.left;
     delete unpositionedOptions.top;
-    try {
-      created = await chrome.windows.create(unpositionedOptions);
-    } catch (unpositionedError) {
-      const browserSizedOptions = { ...unpositionedOptions };
-      delete browserSizedOptions.width;
-      delete browserSizedOptions.height;
-      try {
-        created = await chrome.windows.create(browserSizedOptions);
-      } catch {
-        throw unpositionedError;
-      }
-    }
+    created = await chrome.windows.create(unpositionedOptions);
   }
   if (!Number.isInteger(created?.id)) throw new Error("Chrome did not create the Pi Annotate window");
   const pickerTabId = created.tabs?.find((tab) => tab.url === popupUrl)?.id || created.tabs?.[0]?.id;
   await updatePickerState({
+    modalTabId: null,
     windowId: created.id,
     pickerTabId: Number.isInteger(pickerTabId) ? pickerTabId : null,
   });
+  await closePreviousPickerModal(previousState);
   return { windowId: created.id, reused: false };
+}
+
+async function openPicker(tabHint) {
+  const { normalWindow, targetTab } = await pickerTarget(tabHint);
+  const previousState = await getPickerState();
+  await closePreviousPickerModal(previousState, targetTab?.id);
+
+  if (targetTab?.id && !isRestrictedUrl(targetTab.url)) {
+    await rememberPickerTarget(targetTab, normalWindow, "modal");
+    try {
+      await showPickerInTab(targetTab.id);
+      await closePreviousPickerWindow(previousState);
+      await updatePickerState({ modalTabId: targetTab.id, windowId: null, pickerTabId: null });
+      return { tabId: targetTab.id, surface: "modal" };
+    } catch {
+      // Chrome-owned and otherwise uninjectable pages use the compact extension window.
+    }
+  }
+
+  return openPickerWindow(targetTab, normalWindow);
 }
 
 async function openShortcutSettings() {
@@ -548,11 +611,29 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
         };
       }, sendResponse);
 
+    case "GET_PICKER_STATUS":
+      return runMessageTask(async () => {
+        const config = await getStoredConfig();
+        return { configured: Boolean(config.endpoint && config.token) };
+      }, sendResponse);
+
     case "SAVE_BROKER_CONFIG":
       return runMessageTask(() => saveBrokerConfig(message), sendResponse);
 
     case "OPEN_SHORTCUT_SETTINGS":
       return runMessageTask(openShortcutSettings, sendResponse);
+
+    case "OPEN_PICKER_SETTINGS":
+      return runMessageTask(() => openPickerWindow(sender.tab, undefined, true), sendResponse);
+
+    case "PICKER_CLOSED":
+      return runMessageTask(async () => {
+        const state = await getPickerState();
+        if (sender.tab?.id === state.modalTabId) {
+          await updatePickerState({ modalTabId: null });
+        }
+        return { closed: true };
+      }, sendResponse);
 
     case "COMPLETE_PAIRING":
       return runMessageTask(() => {
@@ -596,14 +677,14 @@ chrome.runtime.onMessageExternal.addListener((message, sender, sendResponse) => 
 });
 
 chrome.action.onClicked.addListener((tab) => {
-  return openPickerWindow(tab).catch(() => {
+  return openPicker(tab).catch(() => {
     // Chrome owns action errors; the next click retries from a fresh target tab.
   });
 });
 
 chrome.commands.onCommand.addListener((command) => {
   if (command !== "toggle-picker") return undefined;
-  return openPickerWindow().catch(() => {
+  return openPicker().catch(() => {
     // Keep command failures quiet; the toolbar action remains available.
   });
 });

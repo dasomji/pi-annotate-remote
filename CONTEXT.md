@@ -28,9 +28,13 @@ _Avoid_: Session label
 A browser-local, advisory mapping from a page origin to the annotation session most recently used there. It preselects a live session but never changes broker routing by itself.
 _Avoid_: Project mapping, base URL binding
 
+**Session chooser**:
+The centered, in-page dialog used to select a live annotation session before starting an annotation. A compact extension window is only a fallback for browser-owned or otherwise uninjectable pages and for connection settings.
+_Avoid_: Picker, popup window
+
 **Annotator**:
 The browser extension and in-page interface used to create and submit an annotation.
-_Avoid_: Chrome plugin, picker
+_Avoid_: Chrome plugin
 
 **Pairing link**:
 A short-lived tailnet HTTPS URL that asks the annotator to connect to one broker. It carries a pairing code in its fragment, never the bearer token.

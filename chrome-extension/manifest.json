@@ -30,7 +30,7 @@
         "default": "Ctrl+Shift+P",
         "mac": "Command+Shift+P"
       },
-      "description": "Open the Pi Annotate session picker"
+      "description": "Open the Pi Annotate session chooser"
     }
   },
   "action": {

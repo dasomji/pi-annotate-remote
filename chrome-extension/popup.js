@@ -1,4 +1,4 @@
-// Pi Annotate - Centered session picker and settings
+// Pi Annotate - Compact fallback session chooser and settings
 
 const endpointInput = document.getElementById("broker-endpoint");
 const tokenInput = document.getElementById("broker-token");
@@ -21,6 +21,7 @@ let configured = false;
 let selectedSessionId = "";
 let settingsOpen = false;
 let refreshSequence = 0;
+const settingsRequested = /(?:^|[?&])settings=1(?:&|$)/.test(window.location?.search || "");
 
 function errorMessage(error, fallback = "Something went wrong") {
   const value = error instanceof Error ? error.message : String(error || fallback);
@@ -285,6 +286,8 @@ startButton.addEventListener("click", async () => {
 chrome.runtime.onMessage.addListener((message) => {
   if (message?.type === "PICKER_CONTEXT_UPDATED") {
     refreshSessions();
+  } else if (message?.type === "OPEN_PICKER_SETTINGS_PANEL") {
+    setSettingsOpen(true);
   }
   return false;
 });
@@ -300,7 +303,7 @@ async function initialize() {
     endpointInput.value = response?.endpoint || "";
     tokenInput.value = response?.token || "";
     configured = Boolean(response?.endpoint && response?.token);
-    setSettingsOpen(!configured);
+    setSettingsOpen(!configured || settingsRequested);
     if (configured) {
       await refreshSessions();
     } else {
