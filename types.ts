@@ -154,11 +154,7 @@ export interface AnnotationResult {
   url?: string;
   /** Viewport dimensions at time of capture */
   viewport?: Viewport;
-  /** True if user cancelled the annotation */
-  cancelled?: boolean;
-  /** True if annotation timed out */
-  timeout?: boolean;
-  /** Error or cancellation reason */
+  /** Failure reason when success is false */
   reason?: string;
   editCapture?: EditCapture;
 }

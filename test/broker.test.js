@@ -432,7 +432,7 @@ test("Pi client reconnects and re-registers after its broker socket closes", asy
   });
 });
 
-test("rejects web-page origins while allowing extension origins", async (t) => {
+test("rejects web-page and foreign-extension origins while allowing the pinned annotator", async (t) => {
   const { baseUrl } = await startBroker(t);
 
   const denied = await fetch(`${baseUrl}/v1/sessions`, {
@@ -441,7 +441,13 @@ test("rejects web-page origins while allowing extension origins", async (t) => {
   assert.equal(denied.status, 403);
   assert.equal((await denied.json()).error.code, "origin_not_allowed");
 
-  const allowedOrigin = "chrome-extension://abcdefghijklmnop";
+  const foreignExtension = await fetch(`${baseUrl}/v1/sessions`, {
+    headers: authorizedHeaders({ Origin: "chrome-extension://abcdefghijklmnop" }),
+  });
+  assert.equal(foreignExtension.status, 403);
+  assert.equal((await foreignExtension.json()).error.code, "origin_not_allowed");
+
+  const allowedOrigin = PAIRING_ORIGIN;
   const allowed = await fetch(`${baseUrl}/v1/sessions`, {
     headers: authorizedHeaders({ Origin: allowedOrigin }),
   });
@@ -531,7 +537,16 @@ test("rejects expired pairing codes and exchange attempts from other extensions"
     body: JSON.stringify({ code: pairing.code }),
   });
   assert.equal(wrongExtension.status, 403);
-  assert.equal((await wrongExtension.json()).error.code, "pairing_origin_not_allowed");
+  assert.equal((await wrongExtension.json()).error.code, "origin_not_allowed");
+
+  // Origin-less clients (e.g. curl) pass the CORS gate but not the pairing pin.
+  const noOrigin = await fetch(`${baseUrl}/v1/pairings/exchange`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ code: pairing.code }),
+  });
+  assert.equal(noOrigin.status, 403);
+  assert.equal((await noOrigin.json()).error.code, "pairing_origin_not_allowed");
 
   now = 1_101;
   const expired = await fetch(`${baseUrl}/v1/pairings/exchange`, {

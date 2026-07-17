@@ -1,7 +1,7 @@
 {
   "manifest_version": 3,
   "name": "Pi Annotate",
-  "version": "0.4.0",
+  "version": "0.4.3",
   "description": "Visual annotation tool for Pi coding agent",
   "key": "MIIBIjANBgkqhkiG9w0BAQEFAAOCAQ8AMIIBCgKCAQEA3bQQ3pwq6AXbNNUzrhH/nUXLkH1n5KbqHpX5ZW3cr3LVIP1c9kUlFSvpUFn0yaYq0tO2QcwoMcPUA0VVZTcEfvunm5Bxsh5PYTDACfBECtydP8yGLk+RwJEi0GNsF1sYR0MNFdRY36Uw7ygiNKl+1fcY9uqyyotUwbMncmX9woCULa3f4tbjY6hisswbsd5/TYp6l0yn96rlGHtRuL8ttYXQ4AWLwqT8K+yjZkA08ghrabh1ZtfKBOel9xFBKQa64LBApSeN1CQs3T78JeOK9IcdEzcJOiJadFOWW6+LUD3aAtMb19QVg8AGEXqXEYVGBVWPhN0ABM4j0o+aFWs1BQIDAQAB",
   "permissions": [

@@ -310,15 +310,8 @@ export default function (pi: ExtensionAPI) {
   
   async function formatResult(result: AnnotationResult): Promise<string> {
     if (!result.success) {
-      if (result.cancelled) {
-        if (result.reason?.includes("Another terminal")) {
-          return `Annotation session ended: ${result.reason}`;
-        }
-        if (result.reason && result.reason !== "user") {
-          return `Annotation cancelled: ${result.reason}`;
-        }
-        return "Annotation cancelled by user.";
-      }
+      // The annotator only submits successful results; this guards against
+      // other broker clients posting arbitrary payloads with a valid token.
       return `Annotation failed: ${result.reason || "Unknown error"}`;
     }
     
