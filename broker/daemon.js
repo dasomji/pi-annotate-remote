@@ -17,9 +17,10 @@ function processIsAlive(pid) {
 function acquireLock(lockPath) {
   for (let attempt = 0; attempt < 2; attempt += 1) {
     try {
-      const descriptor = fs.openSync(lockPath, "wx", 0o600);
-      fs.writeFileSync(descriptor, `${process.pid}\n`);
-      return descriptor;
+      // One atomic create-and-write: a concurrent reader never sees an empty
+      // lock file it would misjudge as stale.
+      fs.writeFileSync(lockPath, `${process.pid}\n`, { flag: "wx", mode: 0o600 });
+      return true;
     } catch (error) {
       if (error?.code !== "EEXIST") throw error;
       let ownerPid = 0;
@@ -28,17 +29,16 @@ function acquireLock(lockPath) {
       } catch {
         // Treat unreadable lock state as stale.
       }
-      if (processIsAlive(ownerPid)) return null;
+      if (processIsAlive(ownerPid)) return false;
       fs.rmSync(lockPath, { force: true });
     }
   }
-  return null;
+  return false;
 }
 
 const config = getBrokerConfig();
 ensurePrivateDirectory(config.runtimeDir);
-const lockDescriptor = acquireLock(config.lockPath);
-if (lockDescriptor === null) process.exit(0);
+if (!acquireLock(config.lockPath)) process.exit(0);
 
 let broker;
 let stopping = false;
@@ -49,7 +49,6 @@ async function stop(exitCode = 0) {
   try {
     await broker?.close();
   } finally {
-    try { fs.closeSync(lockDescriptor); } catch {}
     try {
       const ownerPid = Number.parseInt(fs.readFileSync(config.lockPath, "utf8").trim(), 10);
       if (ownerPid === process.pid) fs.rmSync(config.lockPath, { force: true });

@@ -34,7 +34,19 @@ All notable changes to Pi Annotate.
 - Broker host permission is optional and requested for only the configured hostname. Remote brokers require HTTPS; localhost HTTP remains available for development.
 - Pi sessions are labelled with project directory and Git branch while routing uses a random opaque ID.
 
+### Changed (internal)
+- Split the annotator content script into ordered modules (styles, element inspection, screenshot post-processing, etch capture) injected before the `content.js` entry point; no user-facing behavior change.
+- Extracted one shared send-with-acknowledgement-or-inject helper used by both the session chooser and annotator start paths.
+- Aligned the extension manifest version with the package version.
+
+### Fixed
+- Required an explicit annotator acknowledgement before treating **Start annotation** as handled, preventing the in-page session chooser from closing without opening the annotation bar.
+- A failed annotator start after injection now reports "Pi Annotate could not start on this page" instead of a raw Chrome messaging error.
+- The broker daemon now writes its lock file atomically, so a concurrent starter can no longer misread a half-written lock as stale and remove a live daemon's lock.
+
 ### Security
+- Restricted the `GET_BROKER_CONFIG` message (which carries the bearer token) to trusted extension pages; content-script contexts are refused.
+- Pinned broker CORS to the Pi Annotate extension origin instead of reflecting any `chrome-extension://` origin.
 - Kept long-lived bearer tokens out of pairing URLs by placing only one-time codes in fragments that are never sent in the initial HTTP request.
 - Restricted pairing exchange to the pinned extension origin and derived the broker endpoint from the browser-provided sender URL rather than external message data.
 - Restricted the saved bearer token to trusted extension contexts; the in-page session chooser receives only a boolean connection status and routes privileged work through the service worker.
@@ -43,6 +55,7 @@ All notable changes to Pi Annotate.
 
 ### Removed
 - Native Messaging permission, host bridge, installer scripts, request socket protocol, and native-host setup/troubleshooting flow.
+- Dead cancellation plumbing left over from Native Messaging: the annotator's fire-and-forget `CANCEL` message (dropped by the service worker) and the unreachable cancelled-result formatting in the Pi extension.
 
 ## [0.4.3] - 2026-04-22
 

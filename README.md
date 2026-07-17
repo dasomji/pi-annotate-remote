@@ -204,7 +204,11 @@ Advanced overrides: `PI_ANNOTATE_PORT`, `PI_ANNOTATE_RUNTIME_DIR`, `PI_ANNOTATE_
 | `chrome-extension/picker.js` | Centered in-page session chooser, refresh, recommendation, focus management |
 | `chrome-extension/pair.html` / `pair.js` | Trusted broker confirmation and host-permission request |
 | `chrome-extension/popup.html` / `popup.js` | Compact fallback chooser, connection settings, shortcut settings |
-| `chrome-extension/content.js` | Element selection and annotation UI |
+| `chrome-extension/content.js` | Annotator entry point: element selection, note cards, and annotation UI |
+| `chrome-extension/content-styles.js` | Annotator stylesheet module |
+| `chrome-extension/content-inspect.js` | Element inspection: selectors, box model, accessibility, debug styles |
+| `chrome-extension/content-capture.js` | Screenshot cropping and badge stamping |
+| `chrome-extension/content-etch.js` | Etch edit recording, DOM/CSS diffing, before/after screenshots |
 
 There is no Native Messaging host and no build step.
 

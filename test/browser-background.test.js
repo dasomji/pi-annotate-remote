@@ -5,6 +5,13 @@ import vm from "node:vm";
 
 const backgroundSource = readFileSync(new URL("../chrome-extension/background.js", import.meta.url), "utf8");
 const EXTENSION_ID = "bpeadifabilnfpephegaodjbcjjfjghk";
+const ANNOTATOR_SCRIPT_FILES = [
+  "content-styles.js",
+  "content-inspect.js",
+  "content-capture.js",
+  "content-etch.js",
+  "content.js",
+];
 const TARGET_TAB = {
   id: 7,
   windowId: 3,
@@ -139,6 +146,9 @@ function createHarness({
         }
         tabMessages.push(JSON.parse(JSON.stringify({ tabId, message })));
         if (message?.type === "OPEN_PICKER") return { opened: true };
+        if (message?.type === "START_ANNOTATION" && injected.some((entry) => entry.files?.includes("content.js"))) {
+          return { started: true };
+        }
         return undefined;
       },
       captureVisibleTab(_windowId, _options, callback) {
@@ -317,6 +327,29 @@ test("in-page picker status never exposes broker credentials", async () => {
   assert.deepEqual(await harness.send({ type: "GET_PICKER_STATUS" }), { configured: true });
 });
 
+test("broker config with the bearer token is served only to trusted extension pages", async () => {
+  const harness = createHarness();
+  await configure(harness);
+
+  const trusted = await harness.send({ type: "GET_BROKER_CONFIG" }, {
+    id: EXTENSION_ID,
+    url: `chrome-extension://${EXTENSION_ID}/popup.html`,
+  });
+  assert.deepEqual(trusted, {
+    endpoint: "https://workstation.example.ts.net",
+    token: "secret-token",
+    selectedSessionId: "",
+  });
+
+  const fromContentScript = await harness.send({ type: "GET_BROKER_CONFIG" }, {
+    id: EXTENSION_ID,
+    url: "https://example.test/products/42",
+    tab: { id: 7 },
+  });
+  assert.match(fromContentScript.error, /only available to extension pages/);
+  assert.equal(fromContentScript.token, undefined);
+});
+
 test("background rejects insecure remote endpoints", async () => {
   const harness = createHarness();
   const response = await harness.send({
@@ -459,6 +492,20 @@ test("shortcut settings open in the normal browser window", async () => {
   assert.deepEqual(harness.windowUpdates.at(-1), { windowId: 3, focused: true });
 });
 
+test("starting annotation injects the annotator when only the chooser handles tab messages", async () => {
+  const harness = createHarness();
+  await configure(harness);
+  await harness.triggerAction();
+
+  const response = await harness.send({
+    type: "START_ANNOTATION",
+    sessionId: "session_abcdefghijkl",
+  });
+
+  assert.deepEqual(response, { started: true, baseOrigin: "https://example.test" });
+  assert.deepEqual(harness.injected, [{ target: { tabId: 7 }, files: ANNOTATOR_SCRIPT_FILES }]);
+});
+
 test("starting annotation targets the remembered page and records its origin recommendation", async () => {
   const harness = createHarness();
   await configure(harness);
@@ -470,7 +517,7 @@ test("starting annotation targets the remembered page and records its origin rec
     sessionId: "session_abcdefghijkl",
   });
   assert.deepEqual(response, { started: true, baseOrigin: "https://example.test" });
-  assert.deepEqual(harness.injected, [{ target: { tabId: 7 }, files: ["content.js"] }]);
+  assert.deepEqual(harness.injected, [{ target: { tabId: 7 }, files: ANNOTATOR_SCRIPT_FILES }]);
   assert.deepEqual(harness.tabMessages, [
     { tabId: 7, message: { type: "OPEN_PICKER" } },
     {

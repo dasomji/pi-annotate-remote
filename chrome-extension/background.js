@@ -15,6 +15,15 @@ const MAX_RECOMMENDATIONS = 100;
 const PICKER_WIDTH = 420;
 const PICKER_HEIGHT = 560;
 const PAIRING_CODE_PATTERN = /^[A-Za-z0-9_-]{43}$/;
+// Injection order matters: the annotator entry point (content.js) expects the
+// module files before it to have registered themselves already.
+const ANNOTATOR_SCRIPT_FILES = [
+  "content-styles.js",
+  "content-inspect.js",
+  "content-capture.js",
+  "content-etch.js",
+  "content.js",
+];
 let pickerStateFallback = {};
 
 // Keep the bearer token and picker state out of content-script contexts. Picker,
@@ -216,16 +225,18 @@ function pairingEndpointFromSender(sender) {
   return url.origin;
 }
 
-function isTrustedPairingConfirmation(sender) {
-  if (sender?.id !== chrome.runtime.id || typeof sender?.url !== "string") return false;
+function trustedExtensionPageUrl(sender) {
+  if (sender?.id !== chrome.runtime.id || typeof sender?.url !== "string") return null;
   try {
     const url = new URL(sender.url);
-    return url.protocol === "chrome-extension:" &&
-      url.host === chrome.runtime.id &&
-      url.pathname === "/pair.html";
+    return url.protocol === "chrome-extension:" && url.host === chrome.runtime.id ? url : null;
   } catch {
-    return false;
+    return null;
   }
+}
+
+function isTrustedPairingConfirmation(sender) {
+  return trustedExtensionPageUrl(sender)?.pathname === "/pair.html";
 }
 
 async function openPairingConfirmation(message, sender) {
@@ -402,20 +413,30 @@ async function rememberPickerTarget(targetTab, normalWindow, surface) {
   });
 }
 
-async function showPickerInTab(tabId) {
+async function sendWithAckOrInject(tabId, message, { files, ackKey, errorMessage }) {
   try {
-    const response = await chrome.tabs.sendMessage(tabId, { type: "OPEN_PICKER" });
-    if (response?.opened === true) return;
+    const response = await chrome.tabs.sendMessage(tabId, message);
+    if (response?.[ackKey] === true) return;
   } catch {
-    // The picker content script has not been injected into this document yet.
+    // No script in this document has acknowledged the message yet.
   }
 
-  await chrome.scripting.executeScript({
-    target: { tabId },
+  await chrome.scripting.executeScript({ target: { tabId }, files });
+  let response;
+  try {
+    response = await chrome.tabs.sendMessage(tabId, message);
+  } catch {
+    throw new Error(errorMessage);
+  }
+  if (response?.[ackKey] !== true) throw new Error(errorMessage);
+}
+
+function showPickerInTab(tabId) {
+  return sendWithAckOrInject(tabId, { type: "OPEN_PICKER" }, {
     files: ["picker.js"],
+    ackKey: "opened",
+    errorMessage: "Pi Annotate could not open the in-page picker",
   });
-  const response = await chrome.tabs.sendMessage(tabId, { type: "OPEN_PICKER" });
-  if (response?.opened !== true) throw new Error("Pi Annotate could not open the in-page picker");
 }
 
 async function closePreviousPickerModal(state, nextTabId) {
@@ -534,16 +555,12 @@ async function openShortcutSettings() {
   return { opened: true, tabId: created?.id };
 }
 
-async function sendToContentScript(tabId, message) {
-  try {
-    await chrome.tabs.sendMessage(tabId, message);
-  } catch {
-    await chrome.scripting.executeScript({
-      target: { tabId },
-      files: ["content.js"],
-    });
-    await chrome.tabs.sendMessage(tabId, message);
-  }
+function startAnnotatorInTab(tabId, sessionId) {
+  return sendWithAckOrInject(tabId, { type: "START_ANNOTATION", sessionId }, {
+    files: ANNOTATOR_SCRIPT_FILES,
+    ackKey: "started",
+    errorMessage: "Pi Annotate could not start on this page",
+  });
 }
 
 async function startAnnotation(requestedSessionId) {
@@ -552,7 +569,7 @@ async function startAnnotation(requestedSessionId) {
   const tab = await resolveTargetTab();
   const baseOrigin = pageOrigin(tab.url);
 
-  await sendToContentScript(tab.id, { type: "START_ANNOTATION", sessionId });
+  await startAnnotatorInTab(tab.id, sessionId);
   await chrome.storage.local.set({ selectedSessionId: sessionId });
   await rememberSessionForOrigin(baseOrigin, sessionId);
   return { started: true, baseOrigin };
@@ -603,6 +620,11 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
   switch (message?.type) {
     case "GET_BROKER_CONFIG":
       return runMessageTask(async () => {
+        // The bearer token stays out of content-script contexts; only extension
+        // pages (the compact fallback window) may read the stored config.
+        if (!trustedExtensionPageUrl(sender)) {
+          throw new Error("Broker configuration is only available to extension pages");
+        }
         const config = await getStoredConfig();
         return {
           endpoint: config.endpoint,
@@ -661,10 +683,6 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
 
     case "ANNOTATIONS_COMPLETE":
       return runMessageTask(() => deliverAnnotations(message), sendResponse);
-
-    case "CANCEL":
-      sendResponse({ cancelled: true });
-      return false;
 
     default:
       return false;

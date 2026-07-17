@@ -3,7 +3,21 @@ import { readFileSync } from "node:fs";
 import test from "node:test";
 import vm from "node:vm";
 
-const contentSource = readFileSync(new URL("../chrome-extension/content.js", import.meta.url), "utf8");
+// The annotator ships as ordered classic scripts: module files first, then the
+// content.js entry point (mirrors ANNOTATOR_SCRIPT_FILES in background.js).
+const ANNOTATOR_SCRIPT_FILES = [
+  "content-styles.js",
+  "content-inspect.js",
+  "content-capture.js",
+  "content-etch.js",
+  "content.js",
+];
+const annotatorSources = ANNOTATOR_SCRIPT_FILES.map((file) => ({
+  file,
+  source: readFileSync(new URL(`../chrome-extension/${file}`, import.meta.url), "utf8"),
+}));
+const stylesSource = annotatorSources.find(({ file }) => file === "content-styles.js").source;
+const contentSource = annotatorSources.find(({ file }) => file === "content.js").source;
 
 class FakeClassList {
   constructor() {
@@ -120,7 +134,7 @@ function createHarness() {
     scrollY: 0,
   };
 
-  vm.runInContext(contentSource, vm.createContext({
+  const context = vm.createContext({
     chrome,
     console,
     document,
@@ -131,20 +145,29 @@ function createHarness() {
     setTimeout,
     clearTimeout,
     window,
-  }), { filename: "content.js" });
+  });
+  for (const { file, source } of annotatorSources) {
+    vm.runInContext(source, context, { filename: file });
+  }
 
   return { document, ids, runtimeListener, sentMessages };
 }
 
 test("annotation bar is a floating rounded panel with a multiline context field", () => {
-  assert.match(contentSource, /#pi-panel\s*\{[\s\S]*?bottom: 20px;[\s\S]*?left: 30px;[\s\S]*?right: 30px;/);
-  assert.match(contentSource, /#pi-panel\s*\{[\s\S]*?border-radius: 14px;/);
+  assert.match(stylesSource, /#pi-panel\s*\{[\s\S]*?bottom: 20px;[\s\S]*?left: 30px;[\s\S]*?right: 30px;/);
+  assert.match(stylesSource, /#pi-panel\s*\{[\s\S]*?border-radius: 14px;/);
   assert.match(contentSource, /<textarea id="pi-context" rows="2"/);
 });
 
 test("content UI stays open with Retry until broker delivery is acknowledged", async () => {
   const harness = createHarness();
-  harness.runtimeListener({ type: "START_ANNOTATION", sessionId: "session_abcdefghijkl" }, {}, () => {});
+  let startResponse;
+  harness.runtimeListener(
+    { type: "START_ANNOTATION", sessionId: "session_abcdefghijkl" },
+    {},
+    (response) => { startResponse = response; },
+  );
+  assert.equal(startResponse?.started, true);
 
   const submit = harness.ids.get("pi-submit");
   const error = harness.ids.get("pi-delivery-error");

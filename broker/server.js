@@ -69,7 +69,7 @@ function extractBearerToken(request) {
 
 function defaultOriginAllowed(origin, configuredOrigins) {
   if (!origin) return true;
-  if (origin.startsWith("chrome-extension://")) return true;
+  if (origin === ANNOTATOR_EXTENSION_ORIGIN) return true;
   return configuredOrigins.includes(origin);
 }
 
