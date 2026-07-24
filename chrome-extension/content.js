@@ -1105,7 +1105,7 @@
   }
 
   function onClick(e) {
-    if (!isActive || e.target.closest("#pi-panel") || e.target.closest(".pi-note-card")) return;
+    if (!isActive || e.target.closest("#pi-panel") || e.target.closest(".pi-note-card") || e.target.closest(".pi-abort-backdrop")) return;
 
     e.preventDefault();
     e.stopPropagation();

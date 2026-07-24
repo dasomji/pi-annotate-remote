@@ -46,18 +46,49 @@ class FakeElement {
     this.textContent = "";
     this.value = "";
     this.checked = false;
-    this.innerHTML = "";
+    this._innerHTML = "";
     this.offsetHeight = 96;
   }
+  set innerHTML(value) {
+    this._innerHTML = value;
+    if (value.includes('id="pi-abort-continue"')) {
+      const continueButton = new FakeElement("button");
+      continueButton.id = "pi-abort-continue";
+      const abortButton = new FakeElement("button");
+      abortButton.id = "pi-abort-confirm";
+      this.appendChild(continueButton);
+      this.appendChild(abortButton);
+    }
+  }
+  get innerHTML() { return this._innerHTML; }
   addEventListener(type, listener) { this.listeners.set(type, listener); }
   removeEventListener(type) { this.listeners.delete(type); }
-  appendChild(child) { this.children.push(child); child.isConnected = true; return child; }
+  appendChild(child) { this.children.push(child); child.parentElement = this; child.isConnected = true; return child; }
   remove() { this.isConnected = false; }
   setAttribute(name, value) { this[name] = value; }
   removeAttribute(name) { delete this[name]; }
-  querySelector() { return null; }
-  querySelectorAll() { return []; }
-  closest() { return null; }
+  querySelector(selector) {
+    return this.querySelectorAll(selector)[0] || null;
+  }
+  querySelectorAll(selector) {
+    const matches = [];
+    for (const child of this.children) {
+      if ((selector.startsWith("#") && child.id === selector.slice(1)) ||
+          (selector === "button" && child.tagName === "BUTTON")) matches.push(child);
+      matches.push(...child.querySelectorAll(selector));
+    }
+    return matches;
+  }
+  closest(selector) {
+    let element = this;
+    while (element) {
+      if (selector.startsWith("#") && element.id === selector.slice(1)) return element;
+      if (selector.startsWith(".") && element.className?.split(/\s+/).includes(selector.slice(1))) return element;
+      element = element.parentElement;
+    }
+    return null;
+  }
+  focus() {}
   getBoundingClientRect() { return { left: 0, top: 0, width: 100, height: 40, right: 100, bottom: 40 }; }
   async trigger(type, event = {}) {
     return this.listeners.get(type)?.({
@@ -87,13 +118,14 @@ function createHarness() {
     ids.set(id, element);
   }
 
+  const documentListeners = new Map();
   const document = {
     activeElement: null,
     body: new FakeElement("body"),
     head: new FakeElement("head"),
     documentElement: new FakeElement("html"),
-    addEventListener() {},
-    removeEventListener() {},
+    addEventListener(type, listener) { documentListeners.set(type, listener); },
+    removeEventListener(type) { documentListeners.delete(type); },
     createElement(tagName) { return new FakeElement(tagName); },
     createElementNS(_namespace, tagName) { return new FakeElement(tagName); },
     getElementById(id) { return ids.get(id) || null; },
@@ -150,7 +182,22 @@ function createHarness() {
     vm.runInContext(source, context, { filename: file });
   }
 
-  return { document, ids, runtimeListener, sentMessages };
+  return { document, documentListeners, ids, runtimeListener, sentMessages };
+}
+
+function dispatchDocumentEvent(harness, type, target, properties = {}) {
+  let propagationStopped = false;
+  const event = {
+    key: "",
+    repeat: false,
+    target,
+    preventDefault() {},
+    stopPropagation() { propagationStopped = true; },
+    stopImmediatePropagation() { propagationStopped = true; },
+    ...properties,
+  };
+  harness.documentListeners.get(type)?.(event);
+  if (!propagationStopped) target?.listeners.get(type)?.(event);
 }
 
 test("annotation bar is a floating rounded panel with a multiline context field", () => {
@@ -185,4 +232,24 @@ test("content UI stays open with Retry until broker delivery is acknowledged", a
   assert.equal(deliveries.length, 2);
   const panel = harness.document.body.children.find((element) => element.id === "pi-panel");
   assert.equal(panel.isConnected, false);
+});
+
+test("Continue annotating closes the Escape abort dialog", () => {
+  const harness = createHarness();
+  harness.runtimeListener(
+    { type: "START_ANNOTATION", sessionId: "session_abcdefghijkl" },
+    {},
+    () => {},
+  );
+
+  for (let press = 0; press < 3; press += 1) {
+    dispatchDocumentEvent(harness, "keydown", harness.document.body, { key: "Escape" });
+  }
+
+  const dialog = harness.document.body.children.find((element) => element.className === "pi-abort-backdrop");
+  assert.ok(dialog?.isConnected, "abort dialog should open after the Escape sequence");
+
+  dispatchDocumentEvent(harness, "click", dialog.querySelector("#pi-abort-continue"));
+
+  assert.equal(dialog.isConnected, false, "Continue annotating should close the abort dialog");
 });
