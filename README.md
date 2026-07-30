@@ -115,54 +115,62 @@ A session remains available until `/annotate off`, Pi exits, or its broker conne
 | Open the centered in-page session chooser | Click the toolbar icon or use the shortcut shown under the settings cog |
 | Set or repair the shortcut | Settings cog → **Edit shortcut**, then assign it in Chrome’s extension-shortcut page |
 | Start annotation | Select an annotation session and click **Start annotation** |
-| Select elements | Click the page; Multi mode is the default |
-| Replace selection | Choose **Single** mode |
+| Add an Element annotation | Click the page; consecutive Element annotations remain in the current Interaction step |
+| Operate the site | Click **Pause & interact**; annotation UI is replaced by the paused π bubble |
+| Resume annotation | Click the paused π bubble, or focus it and press Enter/Space |
+| Review the workflow | Choose **All steps** or an individual step in the viewport filmstrip |
+| Delete and restore evidence | Delete from its note card; use **Undo delete** to restore it in place |
 | Cycle ancestors | `Alt/⌥` + scroll while hovering |
 | Add a comment | Type in the floating note card |
-| Reposition a note | Drag its header |
 | Minimize the bar | Click `−`; drag the floating π bubble and click it to restore |
-| Screenshot mode | Choose **Crop**, **Full**, or **None** in the bar |
-| Record browser edits | Enable **Etch** |
+| Record browser edits | Enable **Etch**; recording pauses while the site is interactive |
+| Include diagnostic CSS context | Enable **Debug** before selecting an element |
+| Submit | Click **Submit**; missing mandatory evidence requires explicit confirmation |
 | Cancel | Click **Cancel**, or press Escape three times and confirm **Abort annotation** |
 
-The annotation bar floats 20px above the bottom edge with 30px side margins. Its general-context field is multiline. Minimized mode stops reserving space at the bottom of the page, and both the full bar and floating bubble are hidden during screenshot capture.
+The annotation bar floats 20px above the bottom edge with 30px side margins. Its general-context field is multiline. The first accepted Element annotation creates Step 1 lazily. Pausing and resuming arms the next step without creating an empty one. Minimized Annotation mode remains distinct from Interaction mode: minimized page clicks still annotate, while the paused π bubble returns page input to the site. All annotation chrome is hidden during screenshot capture.
 
 Escape never aborts immediately. It first blurs an active annotation field. Three non-repeated Escape presses within two seconds open an accessible confirmation dialog; Escape closes that dialog, and only **Abort annotation** discards the work.
 
 ## Delivery and retry
 
-Submission is successful only after the selected Pi session acknowledges it. While delivery is pending, the annotation controls stay in a sending state. If the session disconnects, authentication fails, or the network request times out, the annotation UI is restored with a **Retry** button and the selections and comments remain available.
+Submission is successful only after the selected Pi session acknowledges it. While delivery is pending, the draft is frozen in a sending state. If the session disconnects, authentication fails, or the network request times out, the annotation UI is restored with a **Retry** button and the complete ordered draft remains available.
 
 ## Captured context
 
-**Element context** — Selector, text, box model, key styles, attributes, and accessibility information. **Debug** adds computed CSS properties, parent flex/grid/layout context, and up to 50 discovered CSS variables for each selected element.
+**Element context** — Each accepted click freezes selector, text, rectangle, box model, key styles, attributes, and accessibility information. **Debug** adds computed CSS properties, parent flex/grid/layout context, and up to 50 discovered CSS variables at that same point in time.
 
-**Inline note cards** — Draggable comments connected to selected elements, with per-element screenshot controls. The **Notes** toggle only shows or hides these cards; it does not delete selections or comments.
+**Inline note cards** — Comments remain attached to stable Element annotation IDs. If the exact source node disappears, its frozen evidence remains and is marked **Historical — source element no longer exists**. Deletion is undoable for the lifetime of the draft.
 
-**Screenshots** — Pi Annotate captures the currently visible browser viewport, hides its own UI, and sends PNG data with the annotation. **Crop** cuts one image per selected visible element with 20px padding; the camera button on each note can exclude that crop. **Full** sends one visible-viewport image with numbered element badges. **None** sends no ordinary screenshot. Pi writes received images to temporary files and includes their paths in the session message.
+**Screenshots** — Screenshots are mandatory evidence. The first Element annotation in each Interaction step captures the visible viewport, and every Element annotation receives a padded crop derived from that exact same bitmap. Capture is serialized and retried up to three total attempts. Exhausted failures remain explicit missing evidence and require confirmation before submission; they are never silently omitted.
 
-**Edit capture** — **Etch** records page changes made while it is enabled: inline styles, same-origin CSS rules, classes, attributes, text, and DOM structure. When changes are detected, Pi Annotate also captures before/after visible-viewport screenshots. Cross-origin stylesheets cannot be inspected and are reported as warnings.
+**Edit capture** — **Etch** records page changes made during Annotation-mode periods only: inline styles, same-origin CSS rules, classes, attributes, text, and DOM structure. Each non-empty period includes before/after visible-viewport screenshots. Interaction-mode mutations are excluded, and cross-origin stylesheets are reported as warnings.
 
 Example output:
 
 ```markdown
-## Page Annotation: https://example.com
-**Viewport:** 1440×900
-
+## Workflow Annotation: https://example.com
 **Context:** Fix the styling issues
 
-### Selected Elements (1)
+## Step 1
 
-1. **button**
-   - Selector: `#submit-btn`
-   - Classes: `btn, btn-primary`
-   - Text: "Submit"
-   - **Box Model:** 120×40 (content: 96×24, padding: 8 16, border: 1)
-   - **Accessibility:** role=button, name="Submit", focusable=true
-   - **Comment:** Make this blue with rounded corners
+**URL:** https://example.com
 
-### Screenshots
-- Element 1: /tmp/pi-annotate-...-el1.png
+**Viewport:** 1440×900
+
+**Viewport image:** /tmp/pi-annotate-...-step1-viewport.png
+
+### Element 1
+
+- Selector: `#submit-btn`
+- Tag: **button**
+- Classes: `btn, btn-primary`
+- Text: "Submit"
+- Rectangle: 120×40px at (320, 480)
+- Accessibility: role=button, name="Submit", focusable=true
+- **Comment:** Make this blue with rounded corners
+
+**Crop image:** /tmp/pi-annotate-...-step1-element1-crop.png
 ```
 
 ## Security and storage
@@ -204,7 +212,7 @@ Advanced overrides: `PI_ANNOTATE_PORT`, `PI_ANNOTATE_RUNTIME_DIR`, `PI_ANNOTATE_
 | `chrome-extension/picker.js` | Centered in-page session chooser, refresh, recommendation, focus management |
 | `chrome-extension/pair.html` / `pair.js` | Trusted broker confirmation and host-permission request |
 | `chrome-extension/popup.html` / `popup.js` | Compact fallback chooser, connection settings, shortcut settings |
-| `chrome-extension/content.js` | Annotator entry point: element selection, note cards, and annotation UI |
+| `chrome-extension/content.js` | Annotator entry point: Element annotation capture, note cards, and annotation UI |
 | `chrome-extension/content-styles.js` | Annotator stylesheet module |
 | `chrome-extension/content-inspect.js` | Element inspection: selectors, box model, accessibility, debug styles |
 | `chrome-extension/content-capture.js` | Screenshot cropping and badge stamping |

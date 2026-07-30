@@ -55,9 +55,15 @@ function pageMarkup(origin) {
       <button id="mutate" type="button">Mutate page</button>
       <output id="mutation-log"></output>
       <a id="same-tab-route" href="${origin}/destination?source=same-tab">Same-tab destination</a>
-      <form id="post-route" method="post" action="${origin}/destination?source=post-form">
+      <form id="post-route" method="post" target="_blank"
+        enctype="application/x-www-form-urlencoded"
+        action="${origin}/destination?source=post-form">
         <input name="workflow" value="preserve-this-body">
-        <button type="submit">POST-form destination</button>
+        <input name="checked-field" value="included" type="checkbox" checked>
+        <button type="submit" name="intent" value="ship"
+          formaction="${origin}/destination?source=submitter-override"
+          formmethod="post" formenctype="application/x-www-form-urlencoded"
+          formtarget="_self">POST-form destination</button>
       </form>
       <a id="new-target-route" href="${origin}/destination?source=new-target" target="_blank">New-target destination</a>
       <button id="reload-page" type="button">Reload page</button>
@@ -85,6 +91,7 @@ async function startFixtureServer() {
     annotations: [],
     annotationAttempts: 0,
     failDeliveries: 0,
+    deliveryDelayMs: 0,
     destinationRequests: [],
   };
 
@@ -137,6 +144,9 @@ async function startFixtureServer() {
         return;
       }
       state.annotations.push(annotation);
+      if (state.deliveryDelayMs > 0) {
+        await new Promise((resolve) => setTimeout(resolve, state.deliveryDelayMs));
+      }
       if (state.failDeliveries > 0) {
         state.failDeliveries -= 1;
         sendJson(response, 503, { error: { message: "Intentional E2E delivery failure" } });
@@ -221,7 +231,28 @@ export const test = base.extend({
     await use(new URL(extensionWorker.url()).host);
   },
 
-  workflow: async ({ context, extensionWorker, fixtureServer }, use) => {
+  captureControl: async ({ extensionWorker }, use) => {
+    const configure = async ({ failures = 0, delayMs = 0 } = {}) => {
+      await extensionWorker.evaluate(({ failures, delayMs }) => {
+        globalThis.__piE2ECaptureOriginal ||= chrome.tabs.captureVisibleTab.bind(chrome.tabs);
+        globalThis.__piE2ECaptureState = { failures, delayMs };
+        chrome.tabs.captureVisibleTab = (windowId, options, callback) => {
+          const state = globalThis.__piE2ECaptureState;
+          if (state.failures > 0) {
+            state.failures -= 1;
+            setTimeout(() => callback(undefined), state.delayMs);
+            return;
+          }
+          globalThis.__piE2ECaptureOriginal(windowId, options, (dataUrl) => {
+            setTimeout(() => callback(dataUrl), state.delayMs);
+          });
+        };
+      }, { failures, delayMs });
+    };
+    await use({ configure });
+  },
+
+  workflow: async ({ context, extensionWorker, fixtureServer, captureControl }, use) => {
     const pages = context.pages();
     const page = pages[0] || await context.newPage();
     await page.goto(`${fixtureServer.origin}/workflow`);
@@ -251,6 +282,7 @@ export const test = base.extend({
       page,
       server: fixtureServer,
       sessionId: SESSION_ID,
+      captureControl,
     });
   },
 });

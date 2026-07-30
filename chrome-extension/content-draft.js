@@ -99,7 +99,7 @@
       }
     }
 
-    function beginCapture({ sourceNode, metadata, url, viewport }) {
+    function beginCapture({ sourceNode, metadata, cropRect = metadata?.rect, url, viewport }) {
       if (!sourceNode || !metadata || typeof url !== "string" || !viewport) {
         throw new TypeError("Capture requires a source node, metadata, URL, and viewport");
       }
@@ -124,6 +124,7 @@
           attempt: capture.transaction.attempt + 1,
           sourceNode,
           metadata: deepFreeze(clone(metadata)),
+          cropRect: deepFreeze(clone(cropRect)),
           url,
           viewport: deepFreeze(clone(viewport)),
           createsStep: capture.transaction.createsStep,
@@ -155,6 +156,7 @@
         attempt: 1,
         sourceNode,
         metadata: deepFreeze(clone(metadata)),
+        cropRect: deepFreeze(clone(cropRect)),
         url,
         viewport: deepFreeze(clone(viewport)),
         createsStep,

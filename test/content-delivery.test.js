@@ -90,6 +90,14 @@ class FakeElement {
     }
     return null;
   }
+  matches(selector) {
+    return selector.split(",").some((candidate) => {
+      const trimmed = candidate.trim();
+      return (trimmed.startsWith("#") && this.id === trimmed.slice(1)) ||
+        (trimmed.startsWith(".") && this.className?.split(/\s+/).includes(trimmed.slice(1)));
+    });
+  }
+  blur() { this.blurred = true; }
   focus() {}
   getBoundingClientRect() { return { left: 0, top: 0, width: 100, height: 40, right: 100, bottom: 40 }; }
   async trigger(type, event = {}) {
@@ -288,4 +296,23 @@ test("Continue annotating closes the Escape abort dialog", () => {
   dispatchDocumentEvent(harness, "click", dialog.querySelector("#pi-abort-continue"));
 
   assert.equal(dialog.isConnected, false, "Continue annotating should close the abort dialog");
+});
+
+test("Escape blurs an active annotation field before counting toward abort", () => {
+  const harness = createHarness();
+  harness.runtimeListener(
+    { type: "START_ANNOTATION", sessionId: "session_abcdefghijkl" },
+    {},
+    () => {},
+  );
+  const context = harness.ids.get("pi-context");
+  harness.document.activeElement = context;
+
+  dispatchDocumentEvent(harness, "keydown", context, { key: "Escape" });
+
+  assert.equal(context.blurred, true);
+  assert.equal(
+    harness.document.body.children.some((element) => element.className === "pi-abort-backdrop"),
+    false,
+  );
 });

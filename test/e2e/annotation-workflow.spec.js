@@ -1,8 +1,11 @@
 import { test, expect } from "./fixtures/extension.js";
 
 async function annotate(page, targetSelector, comment) {
+  const notes = page.locator(".pi-note-card");
+  const previousCount = await notes.count();
   await page.locator(targetSelector).click();
-  const note = page.locator(".pi-note-card").last();
+  await expect(notes).toHaveCount(previousCount + 1);
+  const note = notes.last();
   await expect(note).toBeVisible();
   await note.locator(".pi-note-textarea").fill(comment);
 }

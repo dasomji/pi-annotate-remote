@@ -151,6 +151,7 @@ test("a retry is a fresh frozen attempt and stale attempts cannot mix into its c
   const first = draft.beginCapture({
     sourceNode: source,
     metadata: firstMetadata,
+    cropRect: { x: 12, y: 24, width: 30, height: 40 },
     url: "https://example.test/before",
     viewport: { width: 800, height: 600 },
   });
@@ -162,10 +163,15 @@ test("a retry is a fresh frozen attempt and stale attempts cannot mix into its c
   }).status, "failed");
 
   const retry = begin(draft, source, "after", {
+    cropRect: { x: 16, y: 32, width: 35, height: 45 },
     url: "https://example.test/after",
     viewport: { width: 1024, height: 768 },
   });
   assert.equal(retry.attempt, 2);
+  assert.deepEqual(
+    JSON.parse(JSON.stringify(retry.cropRect)),
+    { x: 16, y: 32, width: 35, height: 45 },
+  );
   assert.throws(() => draft.commitCapture(first, {
     viewportImage: captured(),
     cropImage: captured(),

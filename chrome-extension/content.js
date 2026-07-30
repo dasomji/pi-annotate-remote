@@ -28,6 +28,7 @@
   let modal = "none";
   let minimized = false;
   let etchEnabled = false;
+  let debugMode = false;
   let stepFilter = "all";
   let hovered = null;
   let hoverStack = [];
@@ -46,6 +47,8 @@
   let bubblePosition = null;
   let escapeCount = 0;
   let escapeTimer = null;
+  let livenessObserver = null;
+  let livenessFrame = null;
 
   let draft = createDraft({ createId: makeId });
   const records = new Map();
@@ -97,6 +100,10 @@
     document.addEventListener("submit", onFormSubmit, true);
     window.addEventListener("scroll", renderEvidence, true);
     window.addEventListener("resize", onResize);
+    if (typeof MutationObserver !== "undefined") {
+      livenessObserver = new MutationObserver(onPageMutations);
+      livenessObserver.observe(document.body, { childList: true, subtree: true });
+    }
     document.body.style.cursor = "crosshair";
     routeGuard.start();
     render();
@@ -130,6 +137,9 @@
         <label class="pi-notes-toggle pi-etch-toggle">
           <input type="checkbox" id="pi-etch-mode"><span>Etch</span>
           <span class="pi-etch-badge" id="pi-etch-count" style="display:none"></span>
+        </label>
+        <label class="pi-notes-toggle" title="Include computed CSS, parent layout, and CSS variables">
+          <input type="checkbox" id="pi-debug-mode"><span>Debug</span>
         </label>
       </div>
       <div class="pi-context-row">
@@ -169,6 +179,10 @@
       if (etchEnabled && mode === "annotating") etch.start();
       else etch.stop();
     });
+    byId("pi-debug-mode")?.addEventListener("change", (event) => {
+      if (operation === "idle") debugMode = event.target.checked;
+      else event.target.checked = debugMode;
+    });
   }
 
   function resetDraft() {
@@ -182,12 +196,14 @@
     modal = "none";
     minimized = false;
     etchEnabled = false;
+    debugMode = false;
     stepFilter = "all";
     failedCapture = null;
     deliveryError = "";
     deliveryConfirmedDegraded = false;
     byId("pi-context") && (byId("pi-context").value = "");
     byId("pi-etch-mode") && (byId("pi-etch-mode").checked = false);
+    byId("pi-debug-mode") && (byId("pi-debug-mode").checked = false);
     closeModal();
     render();
   }
@@ -208,6 +224,10 @@
     document.removeEventListener("submit", onFormSubmit, true);
     window.removeEventListener("scroll", renderEvidence, true);
     window.removeEventListener("resize", onResize);
+    livenessObserver?.disconnect();
+    livenessObserver = null;
+    if (livenessFrame !== null) cancelAnimationFrame(livenessFrame);
+    livenessFrame = null;
     document.body.style.cursor = "";
     closeModal();
     for (const element of [styleEl, panelEl, highlightEl, markersEl, notesEl]) element?.remove();
@@ -229,12 +249,24 @@
       accessibility: inspect.getAccessibilityInfo(element),
       keyStyles: inspect.getKeyStyles(element),
     };
+    if (debugMode) {
+      data.computedStyles = inspect.getComputedStyles(element);
+      data.parentContext = inspect.getParentContext(element);
+      data.cssVariables = inspect.getCSSVariables(element);
+    }
     return data;
   }
 
   async function captureElement(sourceNode) {
     if (mode !== "annotating" || operation !== "idle" || modal !== "none") return;
     const metadata = freezeMetadata(sourceNode);
+    const clientRect = sourceNode.getBoundingClientRect();
+    const cropRect = {
+      x: clientRect.left,
+      y: clientRect.top,
+      width: clientRect.width,
+      height: clientRect.height,
+    };
     if (!captureLifecyclePromise) {
       captureLifecyclePromise = new Promise((resolve) => { resolveCaptureLifecycle = resolve; });
     }
@@ -242,6 +274,7 @@
     const transaction = draft.beginCapture({
       sourceNode,
       metadata,
+      cropRect,
       url: window.location.href,
       viewport,
     });
@@ -265,10 +298,13 @@
     capturePromise = performCapture(transaction);
     await capturePromise;
     capturePromise = null;
-    routeDialogAfterSettle();
+    render();
   }
 
   async function performCapture(transaction) {
+    // Let the live-region progress state paint before temporarily removing the
+    // extension chrome from the source bitmap.
+    await twoFrames();
     const restore = hideChrome();
     await twoFrames();
     let viewportImage;
@@ -277,9 +313,12 @@
       const response = await chrome.runtime.sendMessage({ type: "CAPTURE_SCREENSHOT" });
       if (!response?.dataUrl) throw new Error(response?.error || "Visible viewport capture failed");
       viewportImage = capture.capturedImage(response.dataUrl);
+      // The raw viewport is already frozen, so restore progress chrome while
+      // the crop is decoded and validated.
+      restore();
       try {
         cropImage = await capture.cropToRect(response.dataUrl, {
-          rect: transaction.metadata.rect,
+          rect: transaction.cropRect,
           viewport: transaction.viewport,
           dpr: window.devicePixelRatio || 1,
         });
@@ -305,6 +344,20 @@
       return;
     }
     failedCapture = { transaction, sourceNode: transaction.sourceNode, images: { viewportImage, cropImage } };
+    if (transaction.attempt >= 3) {
+      const committed = draft.commitIncomplete(transaction, { viewportImage, cropImage });
+      records.set(committed.id, {
+        id: committed.id,
+        stepId: committed.stepId,
+        sourceNode: transaction.sourceNode,
+      });
+      failedCapture = null;
+      settleCaptureLifecycle();
+      deliveryConfirmedDegraded = false;
+      render();
+      createNote(committed.id);
+      return;
+    }
     showCaptureFailure(false);
   }
 
@@ -413,14 +466,15 @@
   async function submit() {
     if (operation !== "idle" || modal !== "none") return;
     if (!sessionId) {
-      setDeliveryError("No Pi annotation session is selected. Start again from the extension picker.");
+      setDeliveryError("No Pi annotation session is selected. Start again from the session chooser.");
       return;
     }
     draft.setContext(byId("pi-context")?.value || "");
     if (draft.hasMissingEvidence() && !deliveryConfirmedDegraded) {
+      const affected = missingEvidenceLabels(draft.snapshot());
       showModal("degradedDelivery", {
         title: "Some screenshots are missing",
-        description: "Return to the draft, or explicitly submit the incomplete evidence.",
+        description: `Missing evidence: ${affected.join("; ")}. Return to the draft, or explicitly submit the incomplete evidence.`,
         actions: [
           ["Submit without screenshots", () => {
             deliveryConfirmedDegraded = true;
@@ -466,6 +520,21 @@
     }
   }
 
+  function missingEvidenceLabels(snapshot) {
+    const affected = [];
+    snapshot.steps.forEach((step, stepIndex) => {
+      if (step.viewportImage.status !== "captured") {
+        affected.push(`Step ${stepIndex + 1} viewport`);
+      }
+      step.elements.forEach((element, elementIndex) => {
+        if (element.cropImage.status !== "captured") {
+          affected.push(`Step ${stepIndex + 1}, element ${elementIndex + 1} crop`);
+        }
+      });
+    });
+    return affected;
+  }
+
   function render() {
     if (!panelEl) return;
     panelEl.classList.toggle("pi-interacting", mode === "interacting");
@@ -473,7 +542,7 @@
     panelEl.classList.toggle("pi-busy", operation !== "idle");
     const busy = operation !== "idle";
     const snapshot = draft.snapshot();
-    for (const id of ["pi-pause", "pi-submit", "pi-cancel", "pi-close", "pi-undo", "pi-context", "pi-etch-mode"]) {
+    for (const id of ["pi-pause", "pi-submit", "pi-cancel", "pi-close", "pi-undo", "pi-context", "pi-etch-mode", "pi-debug-mode"]) {
       const control = byId(id);
       if (control) control.disabled = busy;
     }
@@ -775,6 +844,19 @@
     renderEvidence();
   }
 
+  function onPageMutations(mutations) {
+    const sources = Array.from(records.values(), (record) => record.sourceNode).filter(Boolean);
+    if (sources.length === 0 || livenessFrame !== null) return;
+    const affectsSource = mutations.some((mutation) =>
+      [...mutation.addedNodes, ...mutation.removedNodes].some((node) =>
+        sources.some((source) => node === source || node.contains?.(source))));
+    if (!affectsSource) return;
+    livenessFrame = requestAnimationFrame(() => {
+      livenessFrame = null;
+      if (active) render();
+    });
+  }
+
   function showModal(kind, { title, description, actions, returnFocus } = {}) {
     closeModal();
     modal = kind;
@@ -855,6 +937,10 @@
     }
     event.preventDefault();
     if (event.repeat) return;
+    const activeElement = document.activeElement;
+    if (activeElement?.matches?.(".pi-note-textarea, #pi-context")) {
+      activeElement.blur();
+    }
     escapeCount += 1;
     clearTimeout(escapeTimer);
     escapeTimer = setTimeout(() => { escapeCount = 0; }, 2000);
@@ -884,27 +970,74 @@
   let rememberedFormReplay = null;
   function onFormSubmit(event) {
     const form = event.target;
-    const target = (form?.target || "").toLowerCase();
-    if (!form || (target && !["_self", "_top", "_parent"].includes(target))) return;
+    if (!form || !(draft.hasRecoverableWork() || etch.hasChanges?.() === true)) return;
     const submitter = event.submitter;
+    const target = (
+      submitter?.hasAttribute?.("formtarget") ? submitter.formTarget : form.target || ""
+    ).toLowerCase();
+    if (target && !["_self", "_top", "_parent"].includes(target)) return;
+    const descriptor = freezeFormReplay(form, submitter);
     rememberedFormReplay = {
       at: Date.now(),
-      replay: () => {
-        if (submitter && typeof form.requestSubmit === "function") form.requestSubmit(submitter);
-        else if (typeof form.requestSubmit === "function") form.requestSubmit();
-        else form.submit();
-      },
+      replay: descriptor.replay,
     };
 
     // Chromium does not expose every form submission as a cancelable
     // Navigation event in the isolated world. The submit event is itself a
     // synchronous, exact-source seam, so retain and cancel it here.
-    if ((draft.hasRecoverableWork() || etch.hasChanges?.() === true) && event.cancelable) {
+    if (event.cancelable) {
       event.preventDefault();
-      const descriptor = rememberedFormReplay;
+      const retained = rememberedFormReplay;
       rememberedFormReplay = null;
-      routeGuard.retainCanceledRoute(descriptor);
+      routeGuard.retainCanceledRoute(retained);
     }
+  }
+
+  function freezeFormReplay(form, submitter) {
+    const submitterOverride = (attribute, property, fallback) =>
+      submitter?.hasAttribute?.(attribute) ? submitter[property] : fallback;
+    const config = {
+      action: submitterOverride("formaction", "formAction", form.action) || window.location.href,
+      method: (submitterOverride("formmethod", "formMethod", form.method) || "get").toLowerCase(),
+      enctype: submitterOverride("formenctype", "formEnctype", form.enctype) ||
+        "application/x-www-form-urlencoded",
+      target: submitterOverride("formtarget", "formTarget", form.target) || "_self",
+    };
+    const entries = Array.from(new FormData(form, submitter).entries());
+    return {
+      replay: () => {
+        const replayForm = document.createElement("form");
+        replayForm.style.display = "none";
+        replayForm.action = config.action;
+        replayForm.method = config.method;
+        replayForm.enctype = config.enctype;
+        replayForm.target = config.target;
+        for (const [name, value] of entries) {
+          const isFile = typeof File !== "undefined" && value instanceof File;
+          if (isFile && typeof DataTransfer !== "undefined") {
+            const input = document.createElement("input");
+            input.type = "file";
+            input.name = name;
+            const transfer = new DataTransfer();
+            transfer.items.add(value);
+            input.files = transfer.files;
+            replayForm.appendChild(input);
+          } else {
+            const input = document.createElement("input");
+            input.type = "hidden";
+            input.name = name;
+            input.value = isFile ? value.name : value;
+            replayForm.appendChild(input);
+          }
+        }
+        document.body.appendChild(replayForm);
+        try {
+          return HTMLFormElement.prototype.submit.call(replayForm);
+        } finally {
+          replayForm.remove();
+        }
+      },
+    };
   }
 
   function createReplayDescriptor(event) {
@@ -939,12 +1072,6 @@
         window.location.href = destination;
       },
     };
-  }
-
-  function routeDialogAfterSettle() {
-    // The route guard awaits capturePromise. This call only documents the
-    // controller boundary and lets the promise chain drain before rendering.
-    render();
   }
 
   function settleCaptureLifecycle() {

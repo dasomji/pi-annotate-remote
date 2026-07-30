@@ -39,16 +39,46 @@ test("Discard replays a same-tab POST form with its original target and body", a
 
   await page.getByRole("button", { name: "POST-form destination" }).click();
   await expect(page).toHaveURL(`${server.origin}/workflow`);
+  await expect(page.getByRole("dialog", { name: /leave|discard/i })).toBeVisible();
+  await page.locator("#post-route").evaluate((form) => {
+    form.action = `${location.origin}/destination?source=mutated-after-cancel`;
+    form.method = "get";
+    form.enctype = "text/plain";
+    form.elements.workflow.value = "mutated-after-cancel";
+    form.elements["checked-field"].checked = false;
+    const submitter = form.querySelector("button[type='submit']");
+    submitter.formAction = `${location.origin}/destination?source=mutated-submitter`;
+    submitter.formMethod = "get";
+    submitter.formEnctype = "text/plain";
+  });
   await page.getByRole("dialog", { name: /leave|discard/i })
     .getByRole("button", { name: "Discard" })
     .click();
 
-  await expect(page).toHaveURL(`${server.origin}/destination?source=post-form`);
+  await expect(page).toHaveURL(`${server.origin}/destination?source=submitter-override`);
   expect(server.state.destinationRequests).toEqual([{
     method: "POST",
-    search: "?source=post-form",
-    body: "workflow=preserve-this-body",
+    search: "?source=submitter-override",
+    body: "workflow=preserve-this-body&checked-field=included&intent=ship",
   }]);
+});
+
+test("a submitter new-target override opens without warning and preserves the draft", async ({ workflow, context }) => {
+  const { page, server } = workflow;
+  await makeDraftDirty(page);
+  await page.locator("#post-route").evaluate((form) => {
+    form.target = "_self";
+    form.querySelector("button[type='submit']").formTarget = "_blank";
+  });
+
+  const newPagePromise = context.waitForEvent("page");
+  await page.getByRole("button", { name: "POST-form destination" }).click();
+  const newPage = await newPagePromise;
+  await expect(newPage).toHaveURL(`${server.origin}/destination?source=submitter-override`);
+
+  await expect(page).toHaveURL(`${server.origin}/workflow`);
+  await expect(page.locator("#pi-context")).toHaveValue("Protect this draft");
+  await expect(page.getByRole("dialog", { name: /leave|discard/i })).toHaveCount(0);
 });
 
 test("a new-target link opens without warning and leaves the protected draft untouched", async ({ workflow, context }) => {
