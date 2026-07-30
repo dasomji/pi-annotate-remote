@@ -9,7 +9,9 @@ const ANNOTATOR_SCRIPT_FILES = [
   "content-styles.js",
   "content-inspect.js",
   "content-capture.js",
+  "content-draft.js",
   "content-etch.js",
+  "content-route-guard.js",
   "content.js",
 ];
 const TARGET_TAB = {

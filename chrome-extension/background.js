@@ -15,16 +15,22 @@ const MAX_RECOMMENDATIONS = 100;
 const PICKER_WIDTH = 420;
 const PICKER_HEIGHT = 560;
 const PAIRING_CODE_PATTERN = /^[A-Za-z0-9_-]{43}$/;
+const SCREENSHOT_RATE_WINDOW_MS = 1_050;
+const SCREENSHOTS_PER_RATE_WINDOW = 2;
 // Injection order matters: the annotator entry point (content.js) expects the
 // module files before it to have registered themselves already.
 const ANNOTATOR_SCRIPT_FILES = [
   "content-styles.js",
   "content-inspect.js",
   "content-capture.js",
+  "content-draft.js",
   "content-etch.js",
+  "content-route-guard.js",
   "content.js",
 ];
 let pickerStateFallback = {};
+let screenshotCaptureQueue = Promise.resolve();
+let screenshotCaptureTimes = [];
 
 // Keep the bearer token and picker state out of content-script contexts. Picker,
 // pairing, and service-worker pages remain trusted extension contexts.
@@ -590,7 +596,21 @@ async function deliverAnnotations(message) {
   return { delivered: true };
 }
 
-function captureScreenshot(sender) {
+async function captureScreenshotNow(sender) {
+  const now = Date.now();
+  screenshotCaptureTimes = screenshotCaptureTimes.filter(
+    (capturedAt) => now - capturedAt < SCREENSHOT_RATE_WINDOW_MS,
+  );
+  if (screenshotCaptureTimes.length >= SCREENSHOTS_PER_RATE_WINDOW) {
+    const waitMs = SCREENSHOT_RATE_WINDOW_MS - (now - screenshotCaptureTimes[0]);
+    await new Promise((resolve) => setTimeout(resolve, Math.max(1, waitMs)));
+    const resumedAt = Date.now();
+    screenshotCaptureTimes = screenshotCaptureTimes.filter(
+      (capturedAt) => resumedAt - capturedAt < SCREENSHOT_RATE_WINDOW_MS,
+    );
+  }
+  screenshotCaptureTimes.push(Date.now());
+
   return new Promise((resolve, reject) => {
     if (!sender.tab?.windowId) {
       reject(new Error("Cannot capture this browser window"));
@@ -606,6 +626,12 @@ function captureScreenshot(sender) {
       }
     });
   });
+}
+
+function captureScreenshot(sender) {
+  const scheduled = screenshotCaptureQueue.then(() => captureScreenshotNow(sender));
+  screenshotCaptureQueue = scheduled.catch(() => {});
+  return scheduled;
 }
 
 function runMessageTask(task, sendResponse) {

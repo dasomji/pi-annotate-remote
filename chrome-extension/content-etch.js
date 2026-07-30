@@ -118,8 +118,7 @@
     updateCounter();
   }
 
-  function reset() {
-    if (etchObserver) { etchObserver.disconnect(); etchObserver = null; }
+  function clearPeriodState() {
     etchStartTime = null;
     etchInitialRules = null;
     etchStyleInitials = new Map();
@@ -130,6 +129,11 @@
     etchChangeCount = 0;
     updateCounter();
     clearMarkers();
+  }
+
+  function reset() {
+    if (etchObserver) { etchObserver.disconnect(); etchObserver = null; }
+    clearPeriodState();
   }
 
   function updateCounter() {
@@ -480,11 +484,42 @@
     return changes;
   }
 
+  function compileChanges() {
+    const inlineStyles = diffInlineStyles();
+    const currentRulesSnapshot = serializeAllStylesheets();
+    const rules = etchInitialRules ? diffStylesheetRules(etchInitialRules, currentRulesSnapshot) : [];
+    const dom = compileDOMChanges();
+    const warnings = [];
+
+    if (etchInitialRules?.crossOriginCount > 0) {
+      warnings.push(`${etchInitialRules.crossOriginCount} cross-origin stylesheet(s) could not be tracked`);
+    }
+
+    return {
+      inlineStyles,
+      rules,
+      dom,
+      changeCount: inlineStyles.length + rules.length + dom.length,
+      warnings: warnings.length > 0 ? warnings : undefined,
+    };
+  }
+
+  function hasChanges() {
+    if (etchStartTime === null) return false;
+
+    if (etchObserver) {
+      const pending = etchObserver.takeRecords();
+      if (pending.length) processEtchMutations(pending);
+      updateCounter();
+    }
+
+    return compileChanges().changeCount > 0;
+  }
+
   async function captureBeforeAfterScreenshots() {
     clearMarkers();
 
-    const afterResp = await chrome.runtime.sendMessage({ type: "CAPTURE_SCREENSHOT" });
-    const afterScreenshot = afterResp?.dataUrl || null;
+    const afterScreenshot = await captureScreenshot();
 
     // Record final values for redo
     const finalStyles = new Map();
@@ -523,8 +558,7 @@
       await new Promise(r => requestAnimationFrame(() => requestAnimationFrame(r)));
 
       // Capture "before" screenshot (page in original visual state)
-      const beforeResp = await chrome.runtime.sendMessage({ type: "CAPTURE_SCREENSHOT" });
-      beforeScreenshot = beforeResp?.dataUrl || null;
+      beforeScreenshot = await captureScreenshot();
     } finally {
       // REDO: always restore modified visual state, even if before screenshot failed.
       // Prevents leaving the page in the undone state with user's edits lost.
@@ -548,6 +582,13 @@
     }
 
     return { beforeScreenshot, afterScreenshot };
+  }
+
+  async function captureScreenshot() {
+    const response = await chrome.runtime.sendMessage({ type: "CAPTURE_SCREENSHOT" });
+    if (response?.error) throw new Error(response.error);
+    if (!response?.dataUrl) throw new Error("Screenshot capture returned no image");
+    return response.dataUrl;
   }
 
   function restoreStylesheetRules(snapshot) {
@@ -591,22 +632,13 @@
    * state is kept so a failed delivery can collect again on retry.
    */
   async function collect() {
-    if (!etchStartTime) return null;
+    if (etchStartTime === null) return null;
 
     // Disconnect observer first — must happen regardless of errors below
     stop();
 
     try {
-      const inlineStyles = diffInlineStyles();
-      const currentRulesSnapshot = serializeAllStylesheets();
-      const rules = etchInitialRules ? diffStylesheetRules(etchInitialRules, currentRulesSnapshot) : [];
-      const dom = compileDOMChanges();
-      const changeCount = inlineStyles.length + rules.length + dom.length;
-      const warnings = [];
-
-      if (etchInitialRules?.crossOriginCount > 0) {
-        warnings.push(`${etchInitialRules.crossOriginCount} cross-origin stylesheet(s) could not be tracked`);
-      }
+      const { inlineStyles, rules, dom, changeCount, warnings } = compileChanges();
 
       let beforeScreenshot = null;
       let afterScreenshot = null;
@@ -626,7 +658,7 @@
         afterScreenshot,
         duration: Date.now() - etchStartTime,
         changeCount,
-        warnings: warnings.length > 0 ? warnings : undefined,
+        warnings,
       };
     } catch (err) {
       console.error("[pi-annotate] Edit capture failed:", err);
@@ -634,5 +666,37 @@
     }
   }
 
-  modules.etch = { start, stop, reset, clearMarkers, collect };
+  /**
+   * End one Annotation-mode recording period. Empty periods are omitted.
+   * Unlike collect(), finalization consumes all period state. Capture failures
+   * reject so the caller can retain a submission warning without blocking a
+   * transition into Interaction mode.
+   */
+  async function finalize() {
+    if (etchStartTime === null) return null;
+
+    const startedAt = etchStartTime;
+
+    try {
+      stop();
+      const { inlineStyles, rules, dom, changeCount, warnings } = compileChanges();
+      if (changeCount === 0) return null;
+
+      const { beforeScreenshot, afterScreenshot } = await captureBeforeAfterScreenshots();
+      return {
+        inlineStyles,
+        rules,
+        dom,
+        beforeScreenshot,
+        afterScreenshot,
+        duration: Date.now() - startedAt,
+        changeCount,
+        warnings,
+      };
+    } finally {
+      clearPeriodState();
+    }
+  }
+
+  modules.etch = { start, stop, reset, clearMarkers, collect, hasChanges, finalize };
 })();

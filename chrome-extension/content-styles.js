@@ -618,6 +618,109 @@
 
     .pi-btn:disabled { cursor: wait; opacity: 0.65; }
 
+    .pi-btn-pause {
+      background: var(--pi-bg-elevated);
+      color: var(--pi-accent);
+      border: 1px solid var(--pi-accent);
+    }
+
+    .pi-filmstrip {
+      display: flex;
+      align-items: stretch;
+      gap: 5px;
+      min-width: 0;
+      overflow-x: auto;
+    }
+
+    .pi-step-filter {
+      position: relative;
+      display: flex;
+      align-items: center;
+      gap: 5px;
+      flex: none;
+      padding: 5px 8px;
+      border: 1px solid var(--pi-border-muted);
+      border-radius: var(--pi-radius);
+      background: var(--pi-bg-elevated);
+      color: var(--pi-fg-muted);
+      cursor: pointer;
+      font: 11px var(--pi-font-ui);
+    }
+
+    .pi-step-filter.active {
+      border-color: var(--pi-accent);
+      color: var(--pi-accent);
+    }
+
+    .pi-step-thumbnail {
+      width: 34px;
+      height: 22px;
+      border-radius: 2px;
+      object-fit: cover;
+      background: var(--pi-bg-body);
+    }
+
+    .pi-step-missing {
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      color: var(--pi-warning);
+    }
+
+    .pi-step-hidden {
+      color: var(--pi-warning);
+      font-size: 12px;
+    }
+
+    .pi-capture-status {
+      color: var(--pi-accent);
+      font-size: 11px;
+    }
+
+    .pi-resume-bubble {
+      display: none;
+      width: 72px;
+      height: 72px;
+      border: 2px solid var(--pi-warning);
+      border-radius: 50%;
+      background: var(--pi-bg-card);
+      color: var(--pi-warning);
+      box-shadow: 0 4px 24px var(--pi-shadow);
+      cursor: grab;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      gap: 2px;
+      font: 11px var(--pi-font-ui);
+      touch-action: none;
+    }
+
+    #pi-panel.pi-interacting {
+      left: auto;
+      right: 20px;
+      bottom: 20px;
+      width: 72px;
+      height: 72px;
+      padding: 0;
+      border: none;
+      background: transparent;
+      box-shadow: none;
+    }
+
+    #pi-panel.pi-interacting > :not(.pi-resume-bubble) { display: none; }
+    #pi-panel.pi-interacting .pi-resume-bubble { display: flex; }
+    #pi-panel.pi-busy { cursor: wait; }
+
+    .pi-historical {
+      max-width: 150px;
+      color: var(--pi-warning);
+      font-size: 10px;
+      line-height: 1.2;
+    }
+
+    .pi-historical[hidden] { display: none; }
+
+    .pi-modal-backdrop,
     .pi-abort-backdrop {
       position: fixed;
       inset: 0;
@@ -630,6 +733,7 @@
       font-family: var(--pi-font-ui);
     }
 
+    .pi-modal,
     .pi-abort-dialog {
       width: min(420px, calc(100vw - 40px));
       padding: 20px;
@@ -640,9 +744,20 @@
       box-shadow: 0 12px 40px var(--pi-shadow);
     }
 
+    .pi-modal h2,
     .pi-abort-dialog h2 { margin: 0 0 8px; font-size: 17px; }
+    .pi-modal p,
     .pi-abort-dialog p { margin: 0 0 18px; color: var(--pi-fg-muted); font-size: 13px; line-height: 1.5; }
+    .pi-modal-actions,
     .pi-abort-actions { display: flex; justify-content: flex-end; gap: 8px; }
+
+    #pi-panel button:focus-visible,
+    #pi-panel textarea:focus-visible,
+    .pi-modal button:focus-visible,
+    .pi-abort-backdrop button:focus-visible {
+      outline: 3px solid var(--pi-border);
+      outline-offset: 2px;
+    }
   `;
 
   modules.styles = { STYLES };
