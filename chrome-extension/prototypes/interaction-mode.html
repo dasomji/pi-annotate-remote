@@ -1,0 +1,430 @@
+<!doctype html>
+<!--
+  THROWAWAY PROTOTYPE — answers the interaction-mode interface question only.
+  Run: python3 -m http.server 4173 -d chrome-extension/prototypes
+  Open: http://127.0.0.1:4173/interaction-mode.html?variant=a
+-->
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Pi Annotate interaction-mode prototype</title>
+  <style>
+    :root {
+      --ink: #17202a;
+      --muted: #68727d;
+      --paper: #f4f0e8;
+      --card: #fffdf8;
+      --line: #d8d1c5;
+      --pi-bg: #18181e;
+      --pi-card: #22222a;
+      --pi-raised: #2b2b35;
+      --pi-text: #eeeeef;
+      --pi-muted: #9999a3;
+      --pi-teal: #8abeb7;
+      --pi-blue: #6d8fff;
+      --pi-amber: #f0c674;
+      --pi-red: #df7474;
+      --pi-green: #b5bd68;
+      --shadow: 0 16px 46px rgba(22, 24, 28, .27);
+      font-family: Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+    }
+    * { box-sizing: border-box; }
+    body { margin: 0; min-height: 100vh; color: var(--ink); background: var(--paper); }
+    button, textarea { font: inherit; }
+    button { cursor: pointer; }
+    .throwaway {
+      position: fixed; top: 12px; left: 50%; z-index: 50; transform: translateX(-50%);
+      padding: 7px 12px; border: 1px dashed #9c6c2f; border-radius: 999px;
+      color: #704a1e; background: rgba(255, 247, 218, .94); font-size: 11px; font-weight: 750;
+      letter-spacing: .06em; text-transform: uppercase; backdrop-filter: blur(10px);
+    }
+    .site-header { display: flex; align-items: center; gap: 28px; padding: 24px 5vw; border-bottom: 1px solid var(--line); background: rgba(255,253,248,.9); }
+    .brand { font-family: Georgia, serif; font-size: 25px; font-weight: 700; }
+    .site-nav { display: flex; gap: 20px; color: var(--muted); font-size: 14px; }
+    .site-header .site-actions { margin-left: auto; display: flex; gap: 8px; }
+    .site-button { border: 1px solid var(--line); border-radius: 9px; padding: 9px 13px; color: var(--ink); background: var(--card); }
+    .site-button:hover { border-color: #9f9688; background: #fff; }
+    .hero { padding: 70px 7vw 28px; display: grid; grid-template-columns: 1fr auto; gap: 30px; align-items: end; }
+    .eyebrow { margin: 0 0 9px; color: #936b37; font-size: 12px; font-weight: 800; letter-spacing: .12em; text-transform: uppercase; }
+    h1 { max-width: 740px; margin: 0; font: 58px/1.02 Georgia, serif; letter-spacing: -.04em; }
+    .hero p { max-width: 560px; color: var(--muted); line-height: 1.6; }
+    .results { padding: 24px 7vw 220px; }
+    .results-head { display: flex; justify-content: space-between; align-items: center; margin-bottom: 16px; }
+    .results-head h2 { margin: 0; font: 26px Georgia, serif; }
+    .grid { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 18px; }
+    .product { position: relative; overflow: hidden; min-height: 250px; padding: 20px; border: 1px solid var(--line); border-radius: 18px; background: var(--card); }
+    .product-art { height: 130px; margin: -20px -20px 18px; background: linear-gradient(135deg, #b9d7d1, #eef0d5); }
+    .product:nth-child(2) .product-art { background: linear-gradient(135deg, #dbb8a4, #f5e4b2); }
+    .product:nth-child(3) .product-art { background: linear-gradient(135deg, #aebee0, #e4d6ef); }
+    .product h3 { margin: 0 0 7px; font: 21px Georgia, serif; }
+    .product p { margin: 0 0 16px; color: var(--muted); font-size: 13px; line-height: 1.45; }
+    .product-foot { display: flex; align-items: center; justify-content: space-between; }
+    .price { font-weight: 800; }
+    .hint-card { width: 280px; padding: 16px; border: 1px solid #d7c7a7; border-radius: 14px; background: #fff8e9; color: #6e552d; font-size: 13px; line-height: 1.5; }
+    .account-menu { position: fixed; top: 70px; right: 5vw; z-index: 5; width: 230px; padding: 12px; border: 1px solid var(--line); border-radius: 12px; box-shadow: var(--shadow); background: white; }
+    .account-menu[hidden], .modal[hidden] { display: none; }
+    .account-menu strong, .account-menu span { display: block; padding: 8px; }
+    .account-menu span { color: var(--muted); font-size: 13px; }
+    .modal { position: fixed; inset: 0; z-index: 7; display: grid; place-items: center; padding: 30px; background: rgba(23,32,42,.48); }
+    .modal-card { width: min(520px, 90vw); padding: 28px; border-radius: 22px; background: var(--card); box-shadow: var(--shadow); }
+    .modal-card h2 { margin: 0 0 8px; font: 32px Georgia, serif; }
+    .modal-card p { color: var(--muted); line-height: 1.6; }
+
+    /* Shared annotation chrome */
+    #annotation-layer { position: fixed; inset: 0; z-index: 20; pointer-events: none; }
+    .outline { position: fixed; border: 2px solid var(--pi-teal); border-radius: 12px; background: rgba(138,190,183,.11); }
+    .marker { position: fixed; display: grid; place-items: center; width: 28px; height: 28px; border-radius: 50%; color: #15191d; background: var(--pi-teal); font-size: 12px; font-weight: 900; box-shadow: 0 5px 16px rgba(0,0,0,.3); }
+    .note { position: fixed; width: 265px; overflow: hidden; pointer-events: auto; border: 1px solid #50505b; border-radius: 11px; color: var(--pi-text); background: var(--pi-card); box-shadow: var(--shadow); }
+    .note-head { display: flex; align-items: center; gap: 7px; padding: 9px; background: var(--pi-raised); }
+    .note-step { padding: 3px 7px; border-radius: 999px; color: var(--pi-bg); background: var(--pi-teal); font-size: 10px; font-weight: 900; }
+    .note-selector { min-width: 0; flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--pi-muted); font: 11px ui-monospace, monospace; }
+    .note-status { color: var(--pi-amber); font-size: 10px; font-weight: 800; }
+    .delete-item { border: 0; color: var(--pi-muted); background: none; }
+    .delete-item:hover { color: var(--pi-red); }
+    .note textarea { display: block; width: calc(100% - 18px); min-height: 72px; margin: 9px; padding: 9px; resize: none; border: 1px solid #454550; border-radius: 7px; color: var(--pi-text); background: var(--pi-bg); }
+    .historical-card { position: fixed; right: 18px; top: 95px; width: 285px; padding: 13px; pointer-events: auto; border: 1px solid #7a6845; border-radius: 12px; color: var(--pi-text); background: var(--pi-card); box-shadow: var(--shadow); }
+    .historical-card strong { color: var(--pi-amber); }
+    .historical-card p { margin: 6px 0 10px; color: var(--pi-muted); font-size: 12px; line-height: 1.45; }
+    .thumb { height: 55px; border-radius: 7px; background: linear-gradient(135deg, #b9d7d1, #eef0d5); opacity: .72; }
+    .capture-toast { position: fixed; top: 58px; left: 50%; z-index: 24; transform: translateX(-50%); padding: 9px 13px; border-radius: 9px; color: var(--pi-text); background: var(--pi-card); box-shadow: var(--shadow); font-size: 12px; }
+    .capture-toast.error { color: #ffd4d4; border: 1px solid var(--pi-red); }
+
+    .pi-panel { position: fixed; z-index: 22; color: var(--pi-text); background: var(--pi-card); box-shadow: var(--shadow); }
+    .panel-button { border: 1px solid #4d4d58; border-radius: 7px; padding: 7px 11px; color: var(--pi-text); background: var(--pi-raised); }
+    .panel-button:hover { border-color: var(--pi-teal); }
+    .panel-button.primary { border-color: var(--pi-teal); color: #14191c; background: var(--pi-teal); font-weight: 750; }
+    .panel-button.pause { border-color: #7d6943; color: #17191c; background: var(--pi-amber); font-weight: 800; }
+    .step-chip { display: inline-flex; align-items: center; gap: 6px; padding: 5px 8px; border: 1px solid #494953; border-radius: 999px; color: var(--pi-muted); font-size: 11px; }
+    .step-chip.active { border-color: var(--pi-teal); color: var(--pi-text); background: rgba(138,190,183,.1); }
+    .step-chip .dot { width: 6px; height: 6px; border-radius: 50%; background: var(--pi-green); }
+    .step-chip .old { background: var(--pi-amber); }
+
+    /* Variant A — evolution of the current bar */
+    body.variant-a .pi-panel { left: 30px; right: 30px; bottom: 58px; padding: 12px 15px; border: 1px solid #4a4a55; border-radius: 14px; }
+    .a-head { display: flex; align-items: center; gap: 10px; padding-bottom: 9px; border-bottom: 1px solid #33333c; }
+    .pi-wordmark { color: var(--pi-teal); font-weight: 850; }
+    .a-head small { color: var(--pi-muted); }
+    .a-head .pause { margin-left: auto; }
+    .a-body { display: grid; grid-template-columns: auto 1fr auto; align-items: center; gap: 14px; padding-top: 10px; }
+    .step-row { display: flex; gap: 7px; overflow: auto; }
+    .a-context { width: 100%; padding: 8px 10px; border: 1px solid #41414b; border-radius: 8px; color: var(--pi-text); background: var(--pi-bg); }
+
+    /* Variant B — selected direction: viewport filmstrip */
+    body.variant-b .pi-panel { left: 50%; bottom: 58px; width: min(920px, calc(100vw - 44px)); padding: 0; transform: translateX(-50%); overflow: hidden; border: 1px solid #50505b; border-radius: 18px; }
+    .b-top { display: grid; grid-template-columns: auto 1fr auto; align-items: center; gap: 14px; padding: 13px; }
+    .b-actions { display: flex; align-items: center; gap: 8px; }
+    .filmstrip { display: flex; gap: 9px; padding: 12px 13px; border-top: 1px solid #383842; background: #1b1b21; overflow: auto; }
+    .film { position: relative; min-width: 132px; padding: 7px; border: 1px solid #44444f; border-radius: 9px; color: var(--pi-text); text-align: left; background: #202027; }
+    .film:hover { border-color: #737381; }
+    .film.active { border-color: var(--pi-teal); box-shadow: 0 0 0 2px rgba(138,190,183,.12); }
+    .film.hidden-step .film-image { filter: grayscale(.7); opacity: .48; }
+    .film-image { position: relative; height: 58px; margin-bottom: 6px; overflow: hidden; border-radius: 5px; background: #f4f0e8; }
+    .viewport-mini-header { display: block; height: 9px; border-bottom: 1px solid #d8d1c5; background: #fffdf8; }
+    .viewport-mini-hero { display: block; width: 58%; height: 8px; margin: 7px 6px 5px; border-radius: 2px; background: #2c3339; }
+    .viewport-mini-copy { display: block; width: 42%; height: 3px; margin: 0 6px 7px; border-radius: 2px; background: #a8a39a; }
+    .viewport-mini-grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 3px; margin: 0 6px; }
+    .viewport-mini-grid i { height: 20px; border-radius: 2px; background: linear-gradient(135deg, #b9d7d1, #eef0d5); }
+    .viewport-mini-grid i:nth-child(2) { background: linear-gradient(135deg, #dbb8a4, #f5e4b2); }
+    .viewport-mini-grid i:nth-child(3) { background: linear-gradient(135deg, #aebee0, #e4d6ef); }
+    .film:nth-of-type(3) .viewport-mini-grid i { background: linear-gradient(135deg, #c1d0b5, #e5d6a1); }
+    .film-meta { display: flex; justify-content: space-between; color: var(--pi-muted); font-size: 10px; }
+    .eye-off { position: absolute; top: 12px; right: 12px; display: grid; place-items: center; width: 25px; height: 25px; border: 1px solid rgba(255,255,255,.22); border-radius: 50%; color: white; background: rgba(20,20,25,.82); box-shadow: 0 3px 10px rgba(0,0,0,.3); }
+    .eye-off svg { width: 14px; height: 14px; }
+    .film-all { display: grid; place-items: center; min-width: 92px; text-align: center; }
+    .film-all strong { display: block; color: var(--pi-text); font-size: 11px; }
+    .film-all span { display: block; margin-top: 4px; color: var(--pi-muted); font-size: 9px; }
+
+    /* Variant C — timeline rail plus compact action dock */
+    body.variant-c .pi-panel { top: 80px; left: 18px; bottom: 58px; width: 265px; padding: 12px; overflow: auto; border: 1px solid #4a4a55; border-radius: 15px; }
+    .c-title { display: flex; justify-content: space-between; align-items: center; padding-bottom: 10px; border-bottom: 1px solid #393943; }
+    .c-mode { margin: 12px 0; padding: 10px; border: 1px solid rgba(138,190,183,.5); border-radius: 10px; background: rgba(138,190,183,.09); }
+    .c-mode strong, .c-mode small { display: block; }
+    .c-mode small { margin-top: 3px; color: var(--pi-muted); }
+    .timeline { position: relative; margin-left: 9px; padding-left: 18px; border-left: 2px solid #44444e; }
+    .timeline-card { position: relative; margin-bottom: 10px; padding: 10px; border: 1px solid #454550; border-radius: 9px; background: #1c1c22; }
+    .timeline-card::before { content: ""; position: absolute; left: -24px; top: 14px; width: 9px; height: 9px; border: 2px solid var(--pi-card); border-radius: 50%; background: var(--pi-teal); }
+    .timeline-card strong, .timeline-card small { display: block; }
+    .timeline-card small { margin-top: 4px; color: var(--pi-muted); }
+    .c-actions { position: sticky; bottom: 0; display: grid; grid-template-columns: 1fr; gap: 7px; padding-top: 10px; background: linear-gradient(transparent, var(--pi-card) 20%); }
+
+    /* Paused bubble shared by all options */
+    #pause-bubble { position: fixed; right: 24px; bottom: 72px; z-index: 25; width: 68px; height: 68px; display: none; place-items: center; padding: 0; border: 2px solid var(--pi-amber); border-radius: 50%; color: var(--pi-amber); background: var(--pi-card); box-shadow: 0 0 0 7px rgba(240,198,116,.13), var(--shadow); }
+    #pause-bubble .pause-icon { display: flex; gap: 3px; }
+    #pause-bubble .pause-icon i { display: block; width: 4px; height: 14px; border-radius: 2px; background: var(--pi-amber); }
+    #pause-bubble .resume { font-size: 9px; font-weight: 900; letter-spacing: .03em; }
+    #pause-bubble .saved-count { position: absolute; top: -6px; right: -5px; min-width: 22px; padding: 3px 5px; border-radius: 999px; color: #17191c; background: var(--pi-teal); font-size: 10px; font-weight: 900; }
+    body.interacting #pause-bubble { display: grid; }
+    body.interacting .pi-panel, body.interacting #annotation-layer { display: none; }
+    body.annotating [data-annotatable] { cursor: crosshair; }
+    body.annotating .site-button { cursor: crosshair; }
+
+    #state-view { position: fixed; top: 52px; right: 14px; z-index: 45; width: 270px; max-height: 210px; overflow: auto; margin: 0; padding: 10px; border: 1px solid rgba(255,255,255,.15); border-radius: 9px; color: #b9d9d5; background: rgba(18,18,23,.9); box-shadow: 0 8px 24px rgba(0,0,0,.25); font: 10px/1.45 ui-monospace, monospace; pointer-events: none; }
+    #prototype-controls { position: fixed; left: 50%; bottom: 8px; z-index: 60; display: flex; align-items: center; gap: 5px; padding: 6px; transform: translateX(-50%); border: 1px solid #a39b8e; border-radius: 12px; background: rgba(255,253,248,.96); box-shadow: 0 10px 28px rgba(0,0,0,.18); backdrop-filter: blur(12px); }
+    #prototype-controls span { margin: 0 5px; color: var(--muted); font-size: 10px; font-weight: 800; text-transform: uppercase; }
+    #prototype-controls button { border: 1px solid var(--line); border-radius: 7px; padding: 6px 9px; color: var(--ink); background: white; font-size: 11px; }
+    #prototype-controls button.active { border-color: var(--ink); color: white; background: var(--ink); }
+    #prototype-controls button.danger { color: #9c3f3f; }
+    @media (max-width: 850px) {
+      .grid { grid-template-columns: 1fr; }
+      h1 { font-size: 42px; }
+      #state-view { display: none; }
+      body.variant-c .pi-panel { width: 230px; }
+      .b-top { grid-template-columns: 1fr; }
+      .a-body { grid-template-columns: 1fr; }
+    }
+  </style>
+</head>
+<body class="annotating variant-a">
+  <div class="throwaway">Throwaway interface prototype · click product cards to annotate</div>
+
+  <header class="site-header">
+    <div class="brand">Field & Form</div>
+    <nav class="site-nav"><span>Furniture</span><span>Lighting</span><span>Objects</span></nav>
+    <div class="site-actions">
+      <button class="site-button" id="refresh-site">Refresh results</button>
+      <button class="site-button" id="account-button">Account</button>
+    </div>
+  </header>
+  <div class="account-menu" id="account-menu" hidden>
+    <strong>Hello, Daniel</strong><span>Orders</span><span>Saved items</span><span>Sign out</span>
+  </div>
+
+  <main>
+    <section class="hero">
+      <div><p class="eyebrow">Quiet utility</p><h1>Objects that earn their place.</h1><p>Functional pieces from independent studios, selected for thoughtful materials and long use.</p></div>
+      <div class="hint-card"><strong>Prototype scenario</strong><br>Annotate a card, pause, refresh the results or open Quick view, then resume. Earlier items become historical instead of disappearing.</div>
+    </section>
+    <section class="results">
+      <div class="results-head"><h2>New arrivals</h2><span id="result-version">State A · 3 results</span></div>
+      <div class="grid" id="product-grid">
+        <article class="product" data-annotatable="product-lamp"><div class="product-art"></div><h3>Fold Lamp</h3><p>Powder-coated steel with an adjustable reflected shade.</p><div class="product-foot"><span class="price">€148</span><button class="site-button quick-view">Quick view</button></div></article>
+        <article class="product" data-annotatable="product-tray"><div class="product-art"></div><h3>Arc Tray</h3><p>Pressed birch, finished by hand with natural hard wax.</p><div class="product-foot"><span class="price">€76</span><button class="site-button quick-view">Quick view</button></div></article>
+        <article class="product" data-annotatable="product-vase"><div class="product-art"></div><h3>Still Vase</h3><p>Slip-cast porcelain with a soft mineral glaze.</p><div class="product-foot"><span class="price">€92</span><button class="site-button quick-view">Quick view</button></div></article>
+      </div>
+    </section>
+  </main>
+
+  <div class="modal" id="quick-modal" hidden>
+    <div class="modal-card" data-annotatable="quick-view-dialog"><p class="eyebrow">Quick view</p><h2>Fold Lamp</h2><p>This transient dialog exists only after a page interaction. Resume annotation to capture it as the next Interaction step.</p><button class="site-button" id="close-modal">Close</button></div>
+  </div>
+
+  <div id="annotation-layer"></div>
+  <div id="panel-host"></div>
+  <button id="pause-bubble" aria-label="Resume annotation">
+    <span class="saved-count" id="bubble-count">0</span>
+    <span class="pause-icon" aria-hidden="true"><i></i><i></i></span>
+    <span class="resume">RESUME</span>
+  </button>
+  <pre id="state-view"></pre>
+
+  <div id="prototype-controls">
+    <span>Variant</span>
+    <button data-variant="a">A · Familiar</button>
+    <button data-variant="b">B · Filmstrip</button>
+    <button data-variant="c">C · Timeline</button>
+    <span>Simulate</span>
+    <button id="simulate-failure">Capture failure</button>
+    <button id="make-historical">Make historical</button>
+    <button id="reset-prototype" class="danger">Reset</button>
+  </div>
+
+  <script>
+    const initialState = () => ({
+      mode: "annotating",
+      variant: new URLSearchParams(location.search).get("variant") || "a",
+      activeStep: null,
+      visibleStep: "all",
+      nextStep: 1,
+      capture: "idle",
+      etchEnabled: true,
+      routeProtection: "clean",
+      steps: [],
+    });
+    let state = initialState();
+    const panelHost = document.querySelector("#panel-host");
+    const layer = document.querySelector("#annotation-layer");
+    const stateView = document.querySelector("#state-view");
+    const bubble = document.querySelector("#pause-bubble");
+
+    function itemCount() { return state.steps.reduce((sum, step) => sum + step.items.length, 0); }
+    function activeStep() { return state.steps.find(step => step.id === state.activeStep); }
+    function snapshot() {
+      stateView.textContent = JSON.stringify({
+        mode: state.mode,
+        variant: state.variant,
+        activeStep: state.activeStep,
+        visibleStep: state.visibleStep,
+        capture: state.capture,
+        etch: state.mode === "interacting" && state.etchEnabled ? "suspended" : state.etchEnabled ? "recording" : "off",
+        routeProtection: state.routeProtection,
+        steps: state.steps.map(step => ({ id: step.id, viewport: step.viewport, items: step.items.map(item => ({ id: item.id, status: item.historical ? "historical" : "live", crop: item.crop })) })),
+      }, null, 2);
+    }
+    function escapeHtml(value) { return value.replace(/[&<>"']/g, char => ({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[char])); }
+    function stepSummary(step) { return `Step ${step.id} · ${step.items.length} annotation${step.items.length === 1 ? "" : "s"}`; }
+
+    function panelA() {
+      return `<section class="pi-panel">
+        <div class="a-head"><span class="pi-wordmark">π Annotate</span><small>Annotation mode · page clicks create point-in-time captures</small><button class="panel-button pause" data-pause>Pause & interact</button></div>
+        <div class="a-body">
+          <div class="step-row">${state.steps.length ? state.steps.map(step => `<span class="step-chip ${step.id === state.activeStep ? "active" : ""}"><i class="dot ${step.items.some(i => i.historical) ? "old" : ""}"></i>${stepSummary(step)}</span>`).join("") : `<span class="step-chip">First click starts Step 1</span>`}</div>
+          <input class="a-context" aria-label="General context" placeholder="General context for this workflow…">
+          <button class="panel-button primary">Submit ${itemCount() || ""}</button>
+        </div>
+      </section>`;
+    }
+    function eyeOffIcon() {
+      return `<span class="eye-off" title="This step is saved but its annotations are hidden" aria-label="Annotations hidden"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M3 3l18 18"/><path d="M10.6 10.6a2 2 0 0 0 2.8 2.8"/><path d="M9.9 4.2A10.7 10.7 0 0 1 12 4c5.5 0 9 5 9 5a17 17 0 0 1-2.1 2.7"/><path d="M6.6 6.6C4.4 8 3 10 3 10s3.5 5 9 5c.8 0 1.5-.1 2.2-.3"/></svg></span>`;
+    }
+    function viewportThumbnail() {
+      return `<div class="film-image" title="Full visible-viewport screenshot"><i class="viewport-mini-header"></i><i class="viewport-mini-hero"></i><i class="viewport-mini-copy"></i><span class="viewport-mini-grid"><i></i><i></i><i></i></span></div>`;
+    }
+    function panelB() {
+      const allActive = state.visibleStep === "all";
+      const films = state.steps.length
+        ? state.steps.map(step => {
+            const active = state.visibleStep === step.id;
+            const hidden = state.visibleStep !== "all" && !active;
+            return `<button class="film ${active ? "active" : hidden ? "hidden-step" : ""}" data-step-filter="${step.id}" aria-pressed="${active}">${viewportThumbnail()}${hidden ? eyeOffIcon() : ""}<div class="film-meta"><strong>Step ${step.id}</strong><span>${step.items.length} items</span></div></button>`;
+          }).join("")
+        : `<button class="film active" disabled>${viewportThumbnail()}<div class="film-meta"><strong>Next step</strong><span>empty</span></div></button>`;
+      return `<section class="pi-panel">
+        <div class="b-top">
+          <span class="pi-wordmark">π Annotate</span>
+          <div><strong>Capture the current state</strong><div style="color:var(--pi-muted);font-size:11px;margin-top:3px">Viewport once per step · crop once per element</div></div>
+          <div class="b-actions"><button class="panel-button pause" data-pause>Pause & interact</button><button class="panel-button primary">Submit ${itemCount() || ""}</button></div>
+        </div>
+        <div class="filmstrip"><button class="film film-all ${allActive ? "active" : ""}" data-step-filter="all" aria-pressed="${allActive}"><span><strong>All steps</strong><span>${itemCount()} annotations</span></span></button>${films}</div>
+      </section>`;
+    }
+    function panelC() {
+      return `<aside class="pi-panel">
+        <div class="c-title"><span class="pi-wordmark">π Workflow</span><span>${itemCount()} saved</span></div>
+        <div class="c-mode"><strong>Annotation mode</strong><small>Click a page element to capture it.</small></div>
+        <div class="timeline">${state.steps.length ? state.steps.map(step => `<div class="timeline-card"><strong>Step ${step.id}</strong><small>Viewport + ${step.items.length} crop${step.items.length === 1 ? "" : "s"}</small>${step.items.some(i => i.historical) ? `<small style="color:var(--pi-amber)">Contains historical UI</small>` : ""}</div>`).join("") : `<div class="timeline-card"><strong>Step 1</strong><small>Starts on first selection</small></div>`}</div>
+        <div class="c-actions"><button class="panel-button pause" data-pause>Pause to interact</button><button class="panel-button primary">Submit workflow</button></div>
+      </aside>`;
+    }
+    function renderPanel() {
+      panelHost.innerHTML = state.variant === "a" ? panelA() : state.variant === "b" ? panelB() : panelC();
+      panelHost.querySelectorAll("[data-pause]").forEach(button => button.addEventListener("click", pause));
+      panelHost.querySelectorAll("[data-step-filter]").forEach(button => button.addEventListener("click", () => {
+        state.visibleStep = button.dataset.stepFilter === "all" ? "all" : Number(button.dataset.stepFilter);
+        render();
+      }));
+    }
+    function renderLayer() {
+      layer.innerHTML = "";
+      const visibleSteps = state.visibleStep === "all" ? state.steps : state.steps.filter(step => step.id === state.visibleStep);
+      const liveItems = visibleSteps.flatMap(step => step.items.map(item => ({...item, step: step.id}))).filter(item => !item.historical);
+      liveItems.forEach((item, index) => {
+        const element = document.querySelector(`[data-annotatable="${item.elementKey}"]`);
+        if (!element) { item.historical = true; return; }
+        const rect = element.getBoundingClientRect();
+        const outline = document.createElement("div"); outline.className = "outline";
+        Object.assign(outline.style, { left: `${rect.left}px`, top: `${rect.top}px`, width: `${rect.width}px`, height: `${rect.height}px` });
+        const marker = document.createElement("div"); marker.className = "marker"; marker.textContent = index + 1;
+        Object.assign(marker.style, { left: `${Math.max(4, rect.right - 14)}px`, top: `${Math.max(45, rect.top - 14)}px` });
+        layer.append(outline, marker);
+        if (index === liveItems.length - 1) {
+          const note = document.createElement("div"); note.className = "note";
+          Object.assign(note.style, { left: `${Math.min(innerWidth - 285, Math.max(18, rect.left))}px`, top: `${Math.min(innerHeight - 250, Math.max(85, rect.bottom + 12))}px` });
+          note.innerHTML = `<div class="note-head"><span class="note-step">S${item.step}</span><span class="note-selector">${escapeHtml(item.selector)}</span><button class="delete-item" data-delete="${item.id}" title="Delete annotation">×</button></div><textarea placeholder="Describe what should change…"></textarea>`;
+          layer.append(note);
+        }
+      });
+      const oldItems = visibleSteps.flatMap(step => step.items.map(item => ({...item, step: step.id}))).filter(item => item.historical);
+      if (oldItems.length) {
+        const old = oldItems.at(-1); const card = document.createElement("div"); card.className = "historical-card";
+        card.innerHTML = `<strong>Historical · Step ${old.step}</strong><p>${escapeHtml(old.selector)} no longer exists in the current page state. Its metadata, comment, and crop are still saved.</p><div class="thumb"></div><button class="panel-button" data-delete="${old.id}" style="margin-top:9px">Delete annotation + crop</button>`;
+        layer.append(card);
+      }
+      layer.querySelectorAll("[data-delete]").forEach(button => button.addEventListener("click", () => removeItem(button.dataset.delete)));
+    }
+    function render() {
+      document.body.classList.toggle("annotating", state.mode === "annotating");
+      document.body.classList.toggle("interacting", state.mode === "interacting");
+      document.body.classList.remove("variant-a", "variant-b", "variant-c");
+      document.body.classList.add(`variant-${state.variant}`);
+      document.querySelectorAll("[data-variant]").forEach(button => button.classList.toggle("active", button.dataset.variant === state.variant));
+      document.querySelector("#bubble-count").textContent = itemCount();
+      renderPanel(); renderLayer(); snapshot();
+    }
+    function pause() {
+      if (state.capture === "capturing") return;
+      state.mode = "interacting";
+      state.activeStep = null;
+      render();
+    }
+    function resume() {
+      state.mode = "annotating";
+      render();
+    }
+    function showCapture(message, error = false) {
+      document.querySelector(".capture-toast")?.remove();
+      const toast = document.createElement("div"); toast.className = `capture-toast${error ? " error" : ""}`; toast.textContent = message; document.body.append(toast);
+      setTimeout(() => toast.remove(), 1600);
+    }
+    function annotate(element) {
+      if (state.mode !== "annotating" || state.capture === "capturing") return;
+      state.capture = "capturing"; render(); showCapture("Capturing viewport and element crop…");
+      setTimeout(() => {
+        let step = activeStep();
+        if (!step) {
+          step = { id: state.nextStep++, viewport: "captured", items: [] };
+          state.steps.push(step); state.activeStep = step.id; state.visibleStep = step.id;
+        }
+        const key = element.dataset.annotatable;
+        step.items.push({ id: crypto.randomUUID(), elementKey: key, selector: `[data-annotatable=\"${key}\"]`, crop: "captured", historical: false });
+        state.capture = "idle"; state.routeProtection = "dirty"; render(); showCapture(`Saved to Step ${step.id}`);
+      }, 650);
+    }
+    function removeItem(id) {
+      state.steps.forEach(step => { step.items = step.items.filter(item => item.id !== id); });
+      state.steps = state.steps.filter(step => step.items.length > 0);
+      if (!state.steps.some(step => step.id === state.activeStep)) state.activeStep = null;
+      if (state.visibleStep !== "all" && !state.steps.some(step => step.id === state.visibleStep)) {
+        state.visibleStep = state.activeStep || "all";
+      }
+      state.routeProtection = itemCount() ? "dirty" : "clean";
+      render();
+    }
+    function makeHistorical() {
+      const item = state.steps.flatMap(step => step.items).find(candidate => !candidate.historical);
+      if (item) item.historical = true;
+      render();
+    }
+    function refreshResults() {
+      if (state.mode !== "interacting") return;
+      state.steps.flatMap(step => step.items).forEach(item => { if (item.elementKey.startsWith("product-")) item.historical = true; });
+      document.querySelector("#result-version").textContent = "State B · refreshed results";
+      document.querySelector("#product-grid").innerHTML = `<article class="product" data-annotatable="product-chair"><div class="product-art" style="background:linear-gradient(135deg,#c1d0b5,#e5d6a1)"></div><h3>Low Chair</h3><p>Solid ash with a hand-woven paper cord seat.</p><div class="product-foot"><span class="price">€340</span><button class="site-button quick-view">Quick view</button></div></article><article class="product" data-annotatable="product-clock"><div class="product-art" style="background:linear-gradient(135deg,#d6b6b6,#c5d8e7)"></div><h3>Day Clock</h3><p>Quiet movement in a turned aluminium body.</p><div class="product-foot"><span class="price">€128</span><button class="site-button quick-view">Quick view</button></div></article>`;
+      bindSiteInteractions(); render();
+    }
+    function bindSiteInteractions() {
+      document.querySelectorAll("[data-annotatable]").forEach(element => {
+        element.onclick = event => {
+          if (state.mode === "annotating") { event.preventDefault(); event.stopPropagation(); annotate(element); }
+        };
+      });
+      document.querySelectorAll(".quick-view").forEach(button => button.addEventListener("click", event => {
+        if (state.mode === "interacting") { event.stopPropagation(); document.querySelector("#quick-modal").hidden = false; }
+      }));
+    }
+    bubble.addEventListener("click", resume);
+    document.querySelector("#refresh-site").addEventListener("click", refreshResults);
+    document.querySelector("#account-button").addEventListener("click", () => { if (state.mode === "interacting") document.querySelector("#account-menu").hidden = !document.querySelector("#account-menu").hidden; });
+    document.querySelector("#close-modal").addEventListener("click", () => { if (state.mode === "interacting") document.querySelector("#quick-modal").hidden = true; });
+    document.querySelectorAll("[data-variant]").forEach(button => button.addEventListener("click", () => {
+      state.variant = button.dataset.variant; history.replaceState(null, "", `?variant=${state.variant}`); render();
+    }));
+    document.querySelector("#simulate-failure").addEventListener("click", () => { state.capture = "failed"; render(); showCapture("Screenshot failed · annotation not saved · Retry", true); setTimeout(() => { state.capture = "idle"; render(); }, 1700); });
+    document.querySelector("#make-historical").addEventListener("click", makeHistorical);
+    document.querySelector("#reset-prototype").addEventListener("click", () => { state = initialState(); document.querySelector("#result-version").textContent = "State A · 3 results"; location.reload(); });
+    addEventListener("resize", renderLayer);
+    addEventListener("scroll", renderLayer, true);
+    bindSiteInteractions(); render();
+  </script>
+</body>
+</html>

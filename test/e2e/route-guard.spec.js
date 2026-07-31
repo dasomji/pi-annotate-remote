@@ -63,6 +63,30 @@ test("Discard replays a same-tab POST form with its original target and body", a
   }]);
 });
 
+test("Discard preserves a programmatic POST form method, encoding, and body", async ({ workflow }) => {
+  const { page, server } = workflow;
+  await makeDraftDirty(page);
+
+  await page.locator("#post-route").evaluate((form) => {
+    form.target = "_self";
+    form.enctype = "text/plain";
+    form.submit();
+  });
+  await page.waitForFunction(() => document.querySelector(".pi-route-guard-backdrop"));
+  await page.evaluate(() => {
+    const discard = [...document.querySelectorAll(".pi-route-guard-backdrop button")]
+      .find((button) => button.textContent === "Discard");
+    discard?.click();
+  });
+
+  await expect.poll(() => page.url()).toBe(`${server.origin}/destination?source=post-form`);
+  expect(server.state.destinationRequests).toEqual([{
+    method: "POST",
+    search: "?source=post-form",
+    body: "workflow=preserve-this-body\r\nchecked-field=included\r\n",
+  }]);
+});
+
 test("a submitter new-target override opens without warning and preserves the draft", async ({ workflow, context }) => {
   const { page, server } = workflow;
   await makeDraftDirty(page);

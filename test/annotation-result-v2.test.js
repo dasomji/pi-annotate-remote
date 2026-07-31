@@ -77,6 +77,10 @@ test("schema-v2 validation enforces delivery invariants while ignoring additive 
   additive.steps[0].elements[0].futureElementField = { version: 3 };
   assert.equal(isAnnotationResult(additive), true);
 
+  assert.equal(isAnnotationResult(v2Result({
+    etchWarnings: ["Etch screenshots unavailable"],
+  })), true);
+  assert.equal(isAnnotationResult(v2Result({ etchWarnings: [42] })), false);
   assert.equal(isAnnotationResult(v2Result({ success: false })), false);
   assert.equal(isAnnotationResult(v2Result({ steps: [], context: "   " })), false);
 
@@ -190,6 +194,7 @@ test("schema-v2 formatting mirrors step, element, and captured-edit chronology",
         },
       }],
     }],
+    etchWarnings: ["Etch screenshots unavailable"],
     etchCaptures: [{
       inlineStyles: [],
       rules: [],
@@ -212,6 +217,7 @@ test("schema-v2 formatting mirrors step, element, and captured-edit chronology",
   assert.match(output, /### Element 1\n[\s\S]*\*\*Historical\*\*[\s\S]*FIRST ELEMENT/);
   assert.match(output, /Viewport image missing: screenshot_failure \(3 attempts\) — capture timed out/);
   assert.match(output, /Crop image missing: source_disconnected \(2 attempts\)/);
+  assert.match(output, /## Capture warnings[\s\S]*Etch screenshots unavailable/);
   assert.match(output, /## Captured edits/);
   const beforePath = output.match(/\*\*Before:\*\* (\/tmp\/\S+-capture1-before\.png)/)?.[1];
   assert.ok(beforePath, "captured-edit image path includes its chronological position");

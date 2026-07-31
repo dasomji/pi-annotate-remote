@@ -214,6 +214,8 @@ export interface AnnotationResultV2 {
   context?: string;
   steps: InteractionStep[];
   etchCaptures?: EditCapture[];
+  /** Etch periods that could not be finalized and were omitted */
+  etchWarnings?: string[];
 }
 
 /** Versioned delivery union; legacy v1 and nested v2 remain separate paths. */

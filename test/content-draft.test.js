@@ -391,6 +391,7 @@ test("recoverable-work and schema-v2 projection enforce the dirty and zero-step 
     /zero-step/,
   );
   draft.setContext("General context");
+  draft.addEtchWarning("Etch screenshots unavailable");
   assert.deepEqual(
     JSON.parse(JSON.stringify(draft.toAnnotationResult({
       url: "https://example.test/root",
@@ -402,6 +403,7 @@ test("recoverable-work and schema-v2 projection enforce the dirty and zero-step 
       context: "General context",
       steps: [],
       etchCaptures: [{ changeCount: 1, dom: [{ type: "text" }] }],
+      etchWarnings: ["Etch screenshots unavailable"],
     },
   );
 

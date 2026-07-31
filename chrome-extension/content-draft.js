@@ -393,6 +393,7 @@
       };
       if (context.trim()) result.context = context;
       if (etchCaptures.length) result.etchCaptures = clone(etchCaptures);
+      if (etchWarnings.length) result.etchWarnings = [...etchWarnings];
       return result;
     }
 

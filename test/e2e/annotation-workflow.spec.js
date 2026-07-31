@@ -1,14 +1,5 @@
 import { test, expect } from "./fixtures/extension.js";
-
-async function annotate(page, targetSelector, comment) {
-  const notes = page.locator(".pi-note-card");
-  const previousCount = await notes.count();
-  await page.locator(targetSelector).click();
-  await expect(notes).toHaveCount(previousCount + 1);
-  const note = notes.last();
-  await expect(note).toBeVisible();
-  await note.locator(".pi-note-textarea").fill(comment);
-}
+import { annotate } from "./helpers/annotation.js";
 
 async function submit(page) {
   await page.getByRole("button", { name: /^Submit/ }).click();
@@ -101,6 +92,53 @@ test("a failed delivery preserves the complete draft and Retry delivers it uncha
   await expect.poll(() => server.state.annotationAttempts).toBe(2);
   expect(server.state.annotations).toHaveLength(2);
   expect(server.state.annotations[1]).toEqual(server.state.annotations[0]);
+});
+
+test("enabled Etch starts a fresh recording period after delivery failure", async ({ workflow }) => {
+  const { page, server } = workflow;
+  server.state.failDeliveries = 1;
+  await page.locator("#pi-context").fill("Retry Etch recording");
+  await page.locator("label.pi-etch-toggle").click();
+  await page.locator("#state-one").evaluate((element) => {
+    element.style.color = "rgb(200, 0, 0)";
+  });
+
+  await submit(page);
+  await expect(page.getByRole("alert")).toContainText("Intentional E2E delivery failure");
+  await expect(page.locator("#pi-etch-mode")).toBeChecked();
+  await page.locator("#state-one").evaluate((element) => {
+    element.style.color = "rgb(0, 140, 0)";
+  });
+  await expect(page.locator("#pi-etch-count")).toHaveText(/^[1-9]\d*$/);
+  await page.getByRole("button", { name: "Retry" }).click();
+
+  await expect.poll(() => server.state.annotationAttempts).toBe(2);
+  const captures = server.state.annotations[1].etchCaptures;
+  expect(captures).toHaveLength(2);
+  expect(captures[1].inlineStyles[0].changed).toEqual([{
+    property: "color",
+    from: "rgb(200, 0, 0)",
+    to: "rgb(0, 140, 0)",
+  }]);
+});
+
+test("submit delivers an Etch finalization warning when its screenshot fails", async ({ workflow }) => {
+  const { page, server, captureControl } = workflow;
+  await page.locator("#pi-context").fill("Etch warning delivery");
+  await page.locator("label.pi-etch-toggle").click();
+  await expect(page.locator("#pi-etch-mode")).toBeChecked();
+  await page.locator("#state-one").evaluate((element) => {
+    element.style.color = "rgb(200, 0, 0)";
+  });
+  await expect(page.locator("#pi-etch-count")).toHaveText(/^[1-9]\d*$/);
+  await captureControl.configure({ failures: 1 });
+
+  await submit(page);
+
+  await expect.poll(() => server.state.annotations.length).toBe(1);
+  expect(server.state.annotations[0].etchWarnings).toEqual([
+    "Etch capture could not be finalized for submission: Screenshot capture returned no image",
+  ]);
 });
 
 test("Pause and Resume expose keyboard-operable, mode-specific controls with visible focus", async ({ workflow }) => {

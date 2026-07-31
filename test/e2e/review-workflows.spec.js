@@ -1,15 +1,5 @@
 import { test, expect } from "./fixtures/extension.js";
-
-async function annotate(page, selector, comment) {
-  const notes = page.locator(".pi-note-card");
-  const previousCount = await notes.count();
-  await page.locator(selector).click();
-  await expect(notes).toHaveCount(previousCount + 1);
-  const note = notes.last();
-  await expect(note).toBeVisible();
-  await note.locator(".pi-note-textarea").fill(comment);
-  return note;
-}
+import { annotate } from "./helpers/annotation.js";
 
 async function createSecondStep(page) {
   await page.getByRole("button", { name: "Pause & interact" }).click();
@@ -44,14 +34,19 @@ test("consecutive selections retain accepted-click order within one step", async
   ]);
 });
 
-test("step filtering hides other overlays without deletion and All steps restores them", async ({ workflow }) => {
+test("step filtering defaults to the current step and preserves other evidence", async ({ workflow }) => {
   const { page } = workflow;
   await annotate(page, "#state-one", "First-step annotation");
-  await createSecondStep(page);
 
   const stepButtons = page.locator("#pi-filmstrip .pi-step-filter[data-step]:not([data-step='all'])");
+  await expect(stepButtons).toHaveCount(1);
+  await expect(stepButtons.first()).toHaveAttribute("aria-pressed", "true");
+  await createSecondStep(page);
+
   await expect(stepButtons).toHaveCount(2);
-  await expect(page.locator("#pi-markers .pi-marker-badge")).toHaveCount(2);
+  await expect(stepButtons.nth(1)).toHaveAttribute("aria-pressed", "true");
+  await expect(page.locator("#pi-markers .pi-marker-badge")).toHaveCount(1);
+  await expect(stepButtons.first().getByLabel("Hidden by step filter")).toBeVisible();
 
   await stepButtons.first().click();
   await expect(stepButtons.first()).toHaveAttribute("aria-pressed", "true");
@@ -99,6 +94,25 @@ test("a lookalike replacement stays historical while reinserting the exact node 
   expect(element.historical).toBe(false);
   expect(element.comment).toBe("Frozen historical evidence");
   expect(element.cropImage.status).toBe("captured");
+});
+
+test("a historical annotation remains visible after filtering away and back", async ({ workflow }) => {
+  const { page } = workflow;
+  await annotate(page, "#state-one", "Historical after filtering");
+  await createSecondStep(page);
+  await page.locator("#state-one").evaluate((source) => source.remove());
+  await page.evaluate(() => window.dispatchEvent(new Event("resize")));
+
+  const stepButtons = page.locator("#pi-filmstrip .pi-step-filter[data-step]:not([data-step='all'])");
+  await stepButtons.nth(1).click();
+  await stepButtons.nth(0).click();
+
+  const note = page.locator(".pi-note-card");
+  await expect(note).toHaveCount(1);
+  await expect(note.getByRole("status")).toHaveText(
+    "Historical — source element no longer exists",
+  );
+  await expect(note.locator(".pi-note-textarea")).toHaveValue("Historical after filtering");
 });
 
 test("deleting a last element removes its step and Undo restores assets and original position", async ({ workflow }) => {
@@ -170,6 +184,22 @@ test("three screenshot failures name incomplete evidence before explicit degrade
   });
   expect(result.steps[0].elements[0].metadata.text).toBe("Fresh retry state");
   expect(result.steps[0].elements[0].metadata.rect.y).toBeGreaterThan(0);
+});
+
+test("Escape cannot dismiss or strand a failed capture transaction", async ({ workflow }) => {
+  const { page, captureControl } = workflow;
+  await captureControl.configure({ failures: 1 });
+
+  await page.locator("#state-one").click();
+  const failure = page.getByRole("dialog", { name: "Screenshot capture failed" });
+  await expect(failure).toBeVisible();
+  await page.keyboard.press("Escape");
+
+  await expect(failure).toBeVisible();
+  await expect(page.getByRole("button", { name: "Pause & interact" })).toBeDisabled();
+  await failure.getByRole("button", { name: "Discard" }).click();
+  await expect(failure).toHaveCount(0);
+  await expect(page.getByRole("button", { name: "Pause & interact" })).toBeEnabled();
 });
 
 test("modal focus is trapped and returns to the invoking control", async ({ workflow }) => {

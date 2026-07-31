@@ -223,7 +223,10 @@ function isV2AnnotationResult(value: Record<string, unknown>): value is unknown 
     || !(value.etchCaptures === undefined
       || (Array.isArray(value.etchCaptures)
         && value.etchCaptures.every(capture =>
-          isEditCapture(capture) && capture.changeCount > 0)))) {
+          isEditCapture(capture) && capture.changeCount > 0)))
+    || !(value.etchWarnings === undefined
+      || (Array.isArray(value.etchWarnings)
+        && value.etchWarnings.every(warning => typeof warning === "string" && warning.trim())))) {
     return false;
   }
   if (value.steps.length === 0 && !(typeof value.context === "string" && value.context.trim())) {
@@ -425,6 +428,10 @@ async function formatV2Result(result: AnnotationResultV2): Promise<string> {
   }
 
   if (result.steps.length === 0) output += "*No interaction steps*\n\n";
+  if (result.etchWarnings?.length) {
+    output += "## Capture warnings\n\n";
+    for (const warning of result.etchWarnings) output += `> **Warning:** ${warning}\n\n`;
+  }
   if (result.etchCaptures?.length) {
     output += "## Captured edits\n\n";
     for (let index = 0; index < result.etchCaptures.length; index++) {

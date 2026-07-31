@@ -98,6 +98,7 @@
     document.addEventListener("mousemove", onDragMove, true);
     document.addEventListener("mouseup", endBubbleDrag, true);
     document.addEventListener("submit", onFormSubmit, true);
+    document.addEventListener("formdata", onFormData, true);
     window.addEventListener("scroll", renderEvidence, true);
     window.addEventListener("resize", onResize);
     if (typeof MutationObserver !== "undefined") {
@@ -222,6 +223,7 @@
     document.removeEventListener("mousemove", onDragMove, true);
     document.removeEventListener("mouseup", endBubbleDrag, true);
     document.removeEventListener("submit", onFormSubmit, true);
+    document.removeEventListener("formdata", onFormData, true);
     window.removeEventListener("scroll", renderEvidence, true);
     window.removeEventListener("resize", onResize);
     livenessObserver?.disconnect();
@@ -336,6 +338,7 @@
     operation = "idle";
     if (result.status === "committed") {
       records.set(result.id, { id: result.id, stepId: result.stepId, sourceNode: transaction.sourceNode });
+      selectCreatedStep(transaction, result);
       failedCapture = null;
       settleCaptureLifecycle();
       deliveryConfirmedDegraded = false;
@@ -351,6 +354,7 @@
         stepId: committed.stepId,
         sourceNode: transaction.sourceNode,
       });
+      selectCreatedStep(transaction, committed);
       failedCapture = null;
       settleCaptureLifecycle();
       deliveryConfirmedDegraded = false;
@@ -384,12 +388,17 @@
     };
     const result = draft.commitIncomplete(transaction, images);
     records.set(result.id, { id: result.id, stepId: result.stepId, sourceNode: transaction.sourceNode });
+    selectCreatedStep(transaction, result);
     failedCapture = null;
     settleCaptureLifecycle();
     deliveryConfirmedDegraded = false;
     closeModal();
     render();
     createNote(result.id);
+  }
+
+  function selectCreatedStep(transaction, result) {
+    if (transaction.createsStep) stepFilter = result.stepId;
   }
 
   function discardFailedCapture() {
@@ -497,6 +506,7 @@
       result = draft.toAnnotationResult({ url: window.location.href });
     } catch (error) {
       operation = "idle";
+      restartEtchAfterDeliveryAttempt();
       setDeliveryError(errorMessage(error));
       render();
       return;
@@ -514,10 +524,15 @@
       deactivate({ purge: false });
     } catch (error) {
       operation = "idle";
+      restartEtchAfterDeliveryAttempt();
       setDeliveryError(`Delivery failed: ${errorMessage(error)}`);
       render();
       await routeGuard.deliverySettled({ acknowledged: false });
     }
+  }
+
+  function restartEtchAfterDeliveryAttempt() {
+    if (etchEnabled && mode === "annotating") etch.start();
   }
 
   function missingEvidenceLabels(snapshot) {
@@ -542,9 +557,10 @@
     panelEl.classList.toggle("pi-busy", operation !== "idle");
     const busy = operation !== "idle";
     const snapshot = draft.snapshot();
+    const draftMutationBlocked = busy || snapshot.capture !== null;
     for (const id of ["pi-pause", "pi-submit", "pi-cancel", "pi-close", "pi-undo", "pi-context", "pi-etch-mode", "pi-debug-mode"]) {
       const control = byId(id);
-      if (control) control.disabled = busy;
+      if (control) control.disabled = draftMutationBlocked;
     }
     const status = byId("pi-capture-status");
     if (status) status.textContent =
@@ -554,13 +570,13 @@
       snapshot.etchWarnings.at(-1) || "";
     const submitButton = byId("pi-submit");
     if (submitButton) {
-      submitButton.disabled = busy;
+      submitButton.disabled = draftMutationBlocked;
       submitButton.textContent = operation === "delivering" ? "Sending…" : (deliveryError ? "Retry" : "Submit");
     }
     const undo = byId("pi-undo");
-    if (undo) undo.disabled = busy || !snapshot.canUndo;
-    panelEl.querySelectorAll?.(".pi-step-filter").forEach((control) => { control.disabled = busy; });
-    notesEl?.querySelectorAll?.("button, textarea").forEach((control) => { control.disabled = busy; });
+    if (undo) undo.disabled = draftMutationBlocked || !snapshot.canUndo;
+    panelEl.querySelectorAll?.(".pi-step-filter").forEach((control) => { control.disabled = draftMutationBlocked; });
+    notesEl?.querySelectorAll?.("button, textarea").forEach((control) => { control.disabled = draftMutationBlocked; });
     const error = byId("pi-delivery-error");
     if (error) {
       error.textContent = deliveryError;
@@ -635,15 +651,20 @@
       if (!visible.some((item) => item.element.id === id)) card.remove();
       else updateHistorical(card, visible.find((item) => item.element.id === id).element);
     }
+    for (const { element } of visible) {
+      if (!notesEl.querySelector?.(`[data-annotation-id="${element.id}"]`)) {
+        createNote(element.id, { focus: false });
+      }
+    }
   }
 
-  function createNote(id) {
+  function createNote(id, { focus = true } = {}) {
     const result = currentResult();
     const element = result.steps.flatMap((step) => step.elements).find((item) => item.id === id);
     if (!element) return;
     let card = notesEl.querySelector?.(`[data-annotation-id="${id}"]`);
     if (card) {
-      card.querySelector?.(".pi-note-textarea")?.focus();
+      if (focus) card.querySelector?.(".pi-note-textarea")?.focus();
       return;
     }
     card = document.createElement("section");
@@ -668,7 +689,7 @@
     card.querySelector?.(".pi-note-close")?.addEventListener("click", () => deleteRecord(id));
     notesEl.appendChild(card);
     updateHistorical(card, element);
-    card.querySelector?.(".pi-note-textarea")?.focus();
+    if (focus) card.querySelector?.(".pi-note-textarea")?.focus();
   }
 
   function updateHistorical(card, element) {
@@ -925,7 +946,7 @@
           : (index >= buttons.length - 1 ? 0 : index + 1);
         event.preventDefault();
         buttons[next].focus();
-      } else if (event.key === "Escape" && modal !== "routeGuard") {
+      } else if (event.key === "Escape" && !["routeGuard", "captureFailure"].includes(modal)) {
         event.preventDefault();
         closeModal();
       }
@@ -968,6 +989,16 @@
   }
 
   let rememberedFormReplay = null;
+
+  function onFormData(event) {
+    const form = event.target;
+    if (!form || !(draft.hasRecoverableWork() || etch.hasChanges?.() === true)) return;
+    const target = (form.target || "").toLowerCase();
+    if (target && !["_self", "_top", "_parent"].includes(target)) return;
+    const descriptor = freezeFormReplayEntries(form, null, Array.from(event.formData.entries()));
+    rememberedFormReplay = { at: Date.now(), replay: descriptor.replay };
+  }
+
   function onFormSubmit(event) {
     const form = event.target;
     if (!form || !(draft.hasRecoverableWork() || etch.hasChanges?.() === true)) return;
@@ -993,17 +1024,7 @@
     }
   }
 
-  function freezeFormReplay(form, submitter) {
-    const submitterOverride = (attribute, property, fallback) =>
-      submitter?.hasAttribute?.(attribute) ? submitter[property] : fallback;
-    const config = {
-      action: submitterOverride("formaction", "formAction", form.action) || window.location.href,
-      method: (submitterOverride("formmethod", "formMethod", form.method) || "get").toLowerCase(),
-      enctype: submitterOverride("formenctype", "formEnctype", form.enctype) ||
-        "application/x-www-form-urlencoded",
-      target: submitterOverride("formtarget", "formTarget", form.target) || "_self",
-    };
-    const entries = Array.from(new FormData(form, submitter).entries());
+  function createFrozenFormReplay(config, entries) {
     return {
       replay: () => {
         const replayForm = document.createElement("form");
@@ -1040,6 +1061,26 @@
     };
   }
 
+  function freezeFormReplay(form, submitter) {
+    return freezeFormReplayEntries(
+      form,
+      submitter,
+      Array.from(new FormData(form, submitter).entries()),
+    );
+  }
+
+  function freezeFormReplayEntries(form, submitter, entries) {
+    const submitterOverride = (attribute, property, fallback) =>
+      submitter?.hasAttribute?.(attribute) ? submitter[property] : fallback;
+    return createFrozenFormReplay({
+      action: submitterOverride("formaction", "formAction", form.action) || window.location.href,
+      method: (submitterOverride("formmethod", "formMethod", form.method) || "get").toLowerCase(),
+      enctype: submitterOverride("formenctype", "formEnctype", form.enctype) ||
+        "application/x-www-form-urlencoded",
+      target: submitterOverride("formtarget", "formTarget", form.target) || "_self",
+    }, entries);
+  }
+
   function createReplayDescriptor(event) {
     if (event.formData && rememberedFormReplay && Date.now() - rememberedFormReplay.at < 1000) {
       const descriptor = rememberedFormReplay;
@@ -1048,6 +1089,9 @@
     }
     const destination = event.destination?.url;
     if (!destination) throw new Error("The canceled route has no destination");
+    if (event.formData) {
+      throw new Error("The canceled POST route could not be reconstructed exactly");
+    }
     const navigation = window.navigation;
     if (event.navigationType === "reload") {
       return {
