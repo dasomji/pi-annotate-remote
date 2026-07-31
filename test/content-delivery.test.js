@@ -9,7 +9,9 @@ const ANNOTATOR_SCRIPT_FILES = [
   "content-styles.js",
   "content-inspect.js",
   "content-capture.js",
+  "content-draft.js",
   "content-etch.js",
+  "content-route-guard.js",
   "content.js",
 ];
 const annotatorSources = ANNOTATOR_SCRIPT_FILES.map((file) => ({
@@ -88,6 +90,14 @@ class FakeElement {
     }
     return null;
   }
+  matches(selector) {
+    return selector.split(",").some((candidate) => {
+      const trimmed = candidate.trim();
+      return (trimmed.startsWith("#") && this.id === trimmed.slice(1)) ||
+        (trimmed.startsWith(".") && this.className?.split(/\s+/).includes(trimmed.slice(1)));
+    });
+  }
+  blur() { this.blurred = true; }
   focus() {}
   getBoundingClientRect() { return { left: 0, top: 0, width: 100, height: 40, right: 100, bottom: 40 }; }
   async trigger(type, event = {}) {
@@ -108,6 +118,7 @@ function createHarness() {
   const ids = new Map();
   const requiredIds = [
     "pi-close", "pi-cancel", "pi-submit", "pi-minimize", "pi-minimized-bubble",
+    "pi-pause", "pi-resume-bubble", "pi-filmstrip", "pi-filter-all", "pi-undo",
     "pi-mode-single", "pi-mode-multi", "pi-ss-each", "pi-ss-full", "pi-ss-none",
     "pi-notes-visible", "pi-debug-mode", "pi-etch-mode", "pi-etch-count", "pi-context",
     "pi-delivery-error",
@@ -206,6 +217,13 @@ test("annotation bar is a floating rounded panel with a multiline context field"
   assert.match(contentSource, /<textarea id="pi-context" rows="2"/);
 });
 
+test("annotator exposes mandatory capture and accessible pause/resume controls", () => {
+  assert.doesNotMatch(contentSource, /pi-ss-each|pi-ss-full|pi-ss-none/);
+  assert.match(contentSource, /Pause &amp; interact/);
+  assert.match(contentSource, /aria-label="Resume annotation"/);
+  assert.match(contentSource, /All steps/);
+});
+
 test("content UI stays open with Retry until broker delivery is acknowledged", async () => {
   const harness = createHarness();
   let startResponse;
@@ -218,6 +236,7 @@ test("content UI stays open with Retry until broker delivery is acknowledged", a
 
   const submit = harness.ids.get("pi-submit");
   const error = harness.ids.get("pi-delivery-error");
+  harness.ids.get("pi-context").value = "Please inspect this page";
   await submit.trigger("click");
 
   assert.equal(submit.disabled, false);
@@ -226,12 +245,37 @@ test("content UI stays open with Retry until broker delivery is acknowledged", a
   assert.match(error.textContent, /Delivery failed: annotation session disconnected/);
   const firstDelivery = harness.sentMessages.find((message) => message.type === "ANNOTATIONS_COMPLETE");
   assert.equal(firstDelivery.sessionId, "session_abcdefghijkl");
+  assert.deepEqual(JSON.parse(JSON.stringify(firstDelivery.result)), {
+    schemaVersion: 2,
+    success: true,
+    url: "https://example.test/page",
+    context: "Please inspect this page",
+    steps: [],
+  });
+  assert.equal("prompt" in firstDelivery.result, false);
+  assert.equal("screenshot" in firstDelivery.result, false);
 
   await submit.trigger("click");
   const deliveries = harness.sentMessages.filter((message) => message.type === "ANNOTATIONS_COMPLETE");
   assert.equal(deliveries.length, 2);
   const panel = harness.document.body.children.find((element) => element.id === "pi-panel");
   assert.equal(panel.isConnected, false);
+});
+
+test("Pause & interact returns site ownership and Resume annotation restores annotation mode", async () => {
+  const harness = createHarness();
+  harness.runtimeListener(
+    { type: "START_ANNOTATION", sessionId: "session_abcdefghijkl" },
+    {},
+    () => {},
+  );
+  const panel = harness.document.body.children.find((element) => element.id === "pi-panel");
+
+  await harness.ids.get("pi-pause").trigger("click");
+  assert.equal(panel.classList.contains("pi-interacting"), true);
+
+  await harness.ids.get("pi-resume-bubble").trigger("click");
+  assert.equal(panel.classList.contains("pi-interacting"), false);
 });
 
 test("Continue annotating closes the Escape abort dialog", () => {
@@ -252,4 +296,23 @@ test("Continue annotating closes the Escape abort dialog", () => {
   dispatchDocumentEvent(harness, "click", dialog.querySelector("#pi-abort-continue"));
 
   assert.equal(dialog.isConnected, false, "Continue annotating should close the abort dialog");
+});
+
+test("Escape blurs an active annotation field before counting toward abort", () => {
+  const harness = createHarness();
+  harness.runtimeListener(
+    { type: "START_ANNOTATION", sessionId: "session_abcdefghijkl" },
+    {},
+    () => {},
+  );
+  const context = harness.ids.get("pi-context");
+  harness.document.activeElement = context;
+
+  dispatchDocumentEvent(harness, "keydown", context, { key: "Escape" });
+
+  assert.equal(context.blurred, true);
+  assert.equal(
+    harness.document.body.children.some((element) => element.className === "pi-abort-backdrop"),
+    false,
+  );
 });

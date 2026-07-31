@@ -138,8 +138,10 @@ export interface EditCapture {
   warnings?: string[];
 }
 
-/** Result returned from annotation session */
-export interface AnnotationResult {
+/** Legacy result returned from annotation sessions using schema v1 */
+export interface AnnotationResultV1 {
+  /** Legacy payloads may omit the version discriminator */
+  schemaVersion?: 1;
   /** Whether the annotation completed successfully */
   success: boolean;
   /** Selected elements with their metadata */
@@ -158,3 +160,63 @@ export interface AnnotationResult {
   reason?: string;
   editCapture?: EditCapture;
 }
+
+/** Element metadata frozen at the instant a v2 capture attempt begins */
+export interface FrozenElementMetadata
+  extends Omit<ElementSelection, "comment" | "boxModel" | "accessibility" | "keyStyles"> {
+  boxModel: BoxModel;
+  accessibility: AccessibilityInfo;
+  keyStyles: Record<string, string>;
+}
+
+export type MissingImageReason =
+  | "screenshot_failure"
+  | "crop_failure"
+  | "source_disconnected";
+
+/** Explicit result of a mandatory viewport or element image capture */
+export type ImageCaptureResult =
+  | {
+      status: "captured";
+      mediaType: "image/png";
+      dataUrl: string;
+    }
+  | {
+      status: "missing";
+      reason: MissingImageReason;
+      attempts: 1 | 2 | 3;
+      message?: string;
+    };
+
+/** One selected element and its point-in-time evidence */
+export interface ElementAnnotation {
+  id: string;
+  historical: boolean;
+  comment: string;
+  metadata: FrozenElementMetadata;
+  cropImage: ImageCaptureResult;
+}
+
+/** One uninterrupted Annotation-mode period containing accepted selections */
+export interface InteractionStep {
+  id: string;
+  url: string;
+  viewport: Viewport;
+  viewportImage: ImageCaptureResult;
+  elements: ElementAnnotation[];
+}
+
+/** Ordered same-page workflow annotation delivered using schema v2 */
+export interface AnnotationResultV2 {
+  schemaVersion: 2;
+  success: true;
+  url: string;
+  context?: string;
+  steps: InteractionStep[];
+  etchCaptures?: EditCapture[];
+  /** Etch periods that could not be finalized and were omitted */
+  etchWarnings?: string[];
+}
+
+/** Versioned delivery union; legacy v1 and nested v2 remain separate paths. */
+export type AnnotationResult = AnnotationResultV1 | AnnotationResultV2;

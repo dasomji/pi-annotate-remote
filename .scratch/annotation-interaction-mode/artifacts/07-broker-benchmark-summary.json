@@ -1,0 +1,284 @@
+{
+  "environment": {
+    "maxBodyBytes": 33554432,
+    "deliveryTimeoutMs": 10000,
+    "browserRequestTimeoutMs": 20000
+  },
+  "runs": 3,
+  "results": [
+    {
+      "scene": "medium",
+      "dpr": 2,
+      "steps": 1,
+      "elements": 5,
+      "jsonBytes": 1894662,
+      "status": 202,
+      "overLimit": false,
+      "roundTripMs": {
+        "min": 70.19,
+        "median": 75.27,
+        "max": 75.9
+      },
+      "stringifyMs": {
+        "min": 7.64,
+        "median": 7.68,
+        "max": 7.88
+      },
+      "handlerMs": {
+        "min": 3.47,
+        "median": 3.5,
+        "max": 4.11
+      },
+      "files": 6,
+      "binaryBytes": 1419163
+    },
+    {
+      "scene": "medium",
+      "dpr": 2,
+      "steps": 5,
+      "elements": 25,
+      "jsonBytes": 9472834,
+      "status": 202,
+      "overLimit": false,
+      "roundTripMs": {
+        "min": 620.77,
+        "median": 650.83,
+        "max": 663.82
+      },
+      "stringifyMs": {
+        "min": 40.19,
+        "median": 40.86,
+        "max": 41.81
+      },
+      "handlerMs": {
+        "min": 14.07,
+        "median": 15.27,
+        "max": 18.07
+      },
+      "files": 30,
+      "binaryBytes": 7095815
+    },
+    {
+      "scene": "medium",
+      "dpr": 2,
+      "steps": 10,
+      "elements": 50,
+      "jsonBytes": 18945549,
+      "status": 202,
+      "overLimit": false,
+      "roundTripMs": {
+        "min": 2466.94,
+        "median": 2515.23,
+        "max": 2612.91
+      },
+      "stringifyMs": {
+        "min": 85.2,
+        "median": 86.18,
+        "max": 92.37
+      },
+      "handlerMs": {
+        "min": 25.7,
+        "median": 27.2,
+        "max": 27.35
+      },
+      "files": 60,
+      "binaryBytes": 14191630
+    },
+    {
+      "scene": "medium",
+      "dpr": 2,
+      "steps": 15,
+      "elements": 75,
+      "jsonBytes": 28418319,
+      "status": 202,
+      "overLimit": false,
+      "roundTripMs": {
+        "min": 5301.74,
+        "median": 5379.18,
+        "max": 5742.79
+      },
+      "stringifyMs": {
+        "min": 122.1,
+        "median": 124.75,
+        "max": 129.92
+      },
+      "handlerMs": {
+        "min": 37.43,
+        "median": 41.54,
+        "max": 47.81
+      },
+      "files": 90,
+      "binaryBytes": 21287445
+    },
+    {
+      "scene": "high",
+      "dpr": 1,
+      "steps": 1,
+      "elements": 1,
+      "jsonBytes": 3907858,
+      "status": 202,
+      "overLimit": false,
+      "roundTripMs": {
+        "min": 135.35,
+        "median": 139.12,
+        "max": 150.4
+      },
+      "stringifyMs": {
+        "min": 16,
+        "median": 16.3,
+        "max": 16.93
+      },
+      "handlerMs": {
+        "min": 3.34,
+        "median": 3.46,
+        "max": 3.5
+      },
+      "files": 2,
+      "binaryBytes": 2930330
+    },
+    {
+      "scene": "high",
+      "dpr": 1,
+      "steps": 3,
+      "elements": 15,
+      "jsonBytes": 14213288,
+      "status": 202,
+      "overLimit": false,
+      "roundTripMs": {
+        "min": 1291.96,
+        "median": 1377.45,
+        "max": 1386.05
+      },
+      "stringifyMs": {
+        "min": 50.26,
+        "median": 50.28,
+        "max": 50.94
+      },
+      "handlerMs": {
+        "min": 14.78,
+        "median": 16.29,
+        "max": 20.86
+      },
+      "files": 18,
+      "binaryBytes": 10654614
+    },
+    {
+      "scene": "high",
+      "dpr": 1,
+      "steps": 5,
+      "elements": 25,
+      "jsonBytes": 23688734,
+      "status": 202,
+      "overLimit": false,
+      "roundTripMs": {
+        "min": 3702.01,
+        "median": 3831.64,
+        "max": 3929.55
+      },
+      "stringifyMs": {
+        "min": 98.88,
+        "median": 99.78,
+        "max": 103.95
+      },
+      "handlerMs": {
+        "min": 24.13,
+        "median": 26.59,
+        "max": 29.01
+      },
+      "files": 30,
+      "binaryBytes": 17757690
+    },
+    {
+      "scene": "high",
+      "dpr": 2,
+      "steps": 1,
+      "elements": 1,
+      "jsonBytes": 14661958,
+      "status": 202,
+      "overLimit": false,
+      "roundTripMs": {
+        "min": 1449.13,
+        "median": 1450.66,
+        "max": 1483.13
+      },
+      "stringifyMs": {
+        "min": 54.3,
+        "median": 59.37,
+        "max": 59.44
+      },
+      "handlerMs": {
+        "min": 12.45,
+        "median": 20.08,
+        "max": 20.61
+      },
+      "files": 2,
+      "binaryBytes": 10995907
+    },
+    {
+      "scene": "high",
+      "dpr": 2,
+      "steps": 1,
+      "elements": 5,
+      "jsonBytes": 16450534,
+      "status": 202,
+      "overLimit": false,
+      "roundTripMs": {
+        "min": 1828.7,
+        "median": 1897.14,
+        "max": 1979.61
+      },
+      "stringifyMs": {
+        "min": 58.44,
+        "median": 62.33,
+        "max": 64.32
+      },
+      "handlerMs": {
+        "min": 13.35,
+        "median": 17.98,
+        "max": 19.43
+      },
+      "files": 6,
+      "binaryBytes": 12336063
+    },
+    {
+      "scene": "high",
+      "dpr": 2,
+      "steps": 2,
+      "elements": 10,
+      "jsonBytes": 32900949,
+      "status": 202,
+      "overLimit": false,
+      "roundTripMs": {
+        "min": 7097.59,
+        "median": 7104.29,
+        "max": 7408.06
+      },
+      "stringifyMs": {
+        "min": 134.5,
+        "median": 135.21,
+        "max": 137.57
+      },
+      "handlerMs": {
+        "min": 29.54,
+        "median": 32.06,
+        "max": 35.01
+      },
+      "files": 12,
+      "binaryBytes": 24672126
+    },
+    {
+      "scene": "high",
+      "dpr": 2,
+      "steps": 3,
+      "elements": 15,
+      "jsonBytes": 49351364,
+      "status": 413,
+      "overLimit": true,
+      "roundTripMs": {
+        "min": 93.31,
+        "median": 94.47,
+        "max": 95.6
+      }
+    }
+  ]
+}

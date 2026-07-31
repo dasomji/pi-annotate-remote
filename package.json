@@ -1,6 +1,6 @@
 {
   "name": "pi-annotate",
-  "version": "0.4.3",
+  "version": "0.4.4",
   "description": "Visual annotation tool for Pi coding agent with inline note cards",
   "type": "module",
   "author": "Nico Bailon",
@@ -15,6 +15,10 @@
   "homepage": "https://github.com/dasomji/pi-annotate-remote#readme",
   "scripts": {
     "test": "node --test test/*.test.js",
+    "test:e2e": "playwright test",
+    "test:e2e:headed": "playwright test --headed",
+    "test:e2e:debug": "playwright test --debug",
+    "install:e2e": "playwright install chromium",
     "check": "node --check index.ts && node --check broker/*.js && node --check chrome-extension/*.js"
   },
   "peerDependencies": {
@@ -43,5 +47,8 @@
     "extensions": [
       "./index.ts"
     ]
+  },
+  "devDependencies": {
+    "@playwright/test": "^1.62.1"
   }
 }

@@ -12,6 +12,26 @@ _Avoid_: Comment, report
 A live Pi session that has made itself available to receive annotations.
 _Avoid_: Agent, terminal, client
 
+**Annotation draft**:
+The page-bound, unsent work being assembled in the annotator, including its ordered interaction steps and general context.
+_Avoid_: Unsaved annotation, annotation session
+
+**Annotation mode**:
+The annotator mode in which page input selects elements for the annotation draft.
+_Avoid_: Enabled annotation, selection mode
+
+**Interaction mode**:
+The annotator mode in which page input passes through to the site while the annotation draft remains available.
+_Avoid_: Disabled annotation, browsing mode
+
+**Interaction step**:
+An ordered point-in-time page state from one uninterrupted period of Annotation mode, grouping a viewport image with one or more element annotations.
+_Avoid_: Page, screen, annotation session
+
+**Element annotation**:
+A point-in-time capture of one selected element's context, comment, and cropped image. It remains part of its interaction step even when the source element no longer exists.
+_Avoid_: Selection, marker, note
+
 **Broker**:
 The rendezvous point that lists available annotation sessions and routes each annotation to the selected session.
 _Avoid_: Daemon, server, gateway
