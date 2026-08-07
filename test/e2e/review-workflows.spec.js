@@ -229,7 +229,7 @@ test("Send collapses an Element annotation to its numbered marker and the marker
 
   await expect(card).toBeHidden();
   await expect(page.getByLabel("Current Element annotation target")).toHaveCount(0);
-  const marker = page.getByRole("button", { name: "Open Element annotation 1" });
+  const marker = page.getByRole("button", { name: "Open Element annotation 1.1" });
   await expect(marker).toBeVisible();
   await marker.click();
 
@@ -254,6 +254,23 @@ test("the annotator softly rematerializes without a flourish after Send captures
     flourishes: document.querySelectorAll(".pi-grinsekatze-rematerialize").length,
   }))).toEqual({ bouncing: true, flourishes: 0 });
   await expect(page.locator("#pi-panel")).not.toHaveClass(/pi-rematerializing/, { timeout: 1500 });
+});
+
+test("marker numbers remain anchored to their interaction step while other steps are hidden", async ({ workflow }) => {
+  const { page } = workflow;
+  await annotate(page, "#state-one", "First comment in step one");
+  await annotate(page, "#mutate", "Second comment in step one");
+  await createSecondStep(page);
+
+  const markers = page.locator("#pi-markers .pi-marker-badge");
+  await expect(markers).toHaveText(["2.1"]);
+  await expect(page.getByRole("button", { name: "Open Element annotation 2.1" })).toBeVisible();
+
+  await page.getByRole("button", { name: /^Step 1,/ }).click();
+  await expect(markers).toHaveText(["1.1", "1.2"]);
+
+  await page.getByRole("button", { name: /^All steps,/ }).click();
+  await expect(markers).toHaveText(["1.1", "1.2", "2.1"]);
 });
 
 test("step filtering defaults to the current step and preserves other evidence", async ({ workflow }) => {
@@ -471,10 +488,10 @@ test("a route attempted during capture waits for the atomic transaction before a
   const routeDialog = page.getByRole("dialog", { name: /leave|discard/i });
   await expect(routeDialog).toBeVisible();
   await expect(page.locator(".pi-note-card")).toHaveCount(0);
-  await expect(page.getByRole("button", { name: "Open Element annotation 1" })).toBeVisible();
+  await expect(page.getByRole("button", { name: "Open Element annotation 1.1" })).toBeVisible();
   await routeDialog.getByRole("button", { name: "Stay on this page" }).click();
   await expect(page.locator(".pi-note-card")).toHaveCount(0);
-  await expect(page.getByRole("button", { name: "Open Element annotation 1" })).toBeVisible();
+  await expect(page.getByRole("button", { name: "Open Element annotation 1.1" })).toBeVisible();
 });
 
 test("a route attempted during delivery replays automatically after acknowledgement", async ({ workflow }) => {

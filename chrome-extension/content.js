@@ -755,12 +755,16 @@
     if (!markersEl || !notesEl) return;
     const result = currentResult();
     const visible = [];
-    result.steps.forEach((step) => {
+    result.steps.forEach((step, stepIndex) => {
       if (stepFilter !== "all" && stepFilter !== step.id) return;
-      step.elements.forEach((element) => visible.push({ step, element }));
+      step.elements.forEach((element, elementIndex) => visible.push({
+        step,
+        element,
+        markerNumber: `${stepIndex + 1}.${elementIndex + 1}`,
+      }));
     });
     markersEl.innerHTML = "";
-    for (const { element } of visible) {
+    for (const { element, markerNumber } of visible) {
       const record = records.get(element.id);
       const source = record?.sourceNode;
       if (!source || source.isConnected === false) continue;
@@ -777,11 +781,10 @@
         markersEl.appendChild(outline);
       }
       const marker = document.createElement("button");
-      const markerNumber = visible.findIndex((item) => item.element.id === element.id) + 1;
       marker.className = "pi-marker-badge";
       marker.dataset.annotationId = element.id;
-      marker.style.left = `${rect.right - 14}px`;
-      marker.style.top = `${rect.top - 14}px`;
+      marker.style.left = `${rect.right}px`;
+      marker.style.top = `${rect.top}px`;
       marker.textContent = String(markerNumber);
       marker.setAttribute("aria-label", `Open Element annotation ${markerNumber}`);
       marker.addEventListener("click", (event) => {

@@ -133,8 +133,10 @@
       pointer-events: auto;
       background: var(--pi-accent);
       color: var(--pi-bg-body);
-      width: 28px;
+      width: auto;
+      min-width: 28px;
       height: 28px;
+      padding: 0 6px;
       border-radius: 50%;
       display: flex;
       align-items: center;
@@ -142,11 +144,12 @@
       font: bold 13px var(--pi-font-ui);
       cursor: pointer;
       box-shadow: 0 2px 8px var(--pi-shadow);
+      transform: translate(-50%, -50%);
       transition: transform 0.15s, box-shadow 0.15s;
     }
 
     .pi-marker-badge:hover {
-      transform: scale(1.1);
+      transform: translate(-50%, -50%) scale(1.1);
       background: var(--pi-accent-hover);
     }
 
