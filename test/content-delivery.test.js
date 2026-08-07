@@ -211,15 +211,15 @@ function dispatchDocumentEvent(harness, type, target, properties = {}) {
   if (!propagationStopped) target?.listeners.get(type)?.(event);
 }
 
-test("annotation bar is a floating rounded panel with a multiline context field", () => {
-  assert.match(stylesSource, /#pi-panel\s*\{[\s\S]*?bottom: 20px;[\s\S]*?left: 30px;[\s\S]*?right: 30px;/);
-  assert.match(stylesSource, /#pi-panel\s*\{[\s\S]*?border-radius: 14px;/);
+test("annotation bar exposes coordinated filmstrip and composer surfaces", () => {
+  assert.match(contentSource, /aria-label="Interaction steps"/);
+  assert.match(contentSource, /role="group" aria-label="Annotation composer"/);
   assert.match(contentSource, /<textarea id="pi-context" rows="2"/);
 });
 
 test("annotator exposes mandatory capture and accessible pause/resume controls", () => {
   assert.doesNotMatch(contentSource, /pi-ss-each|pi-ss-full|pi-ss-none/);
-  assert.match(contentSource, /Pause &amp; interact/);
+  assert.match(contentSource, /Interact with page/);
   assert.match(contentSource, /aria-label="Resume annotation"/);
   assert.match(contentSource, /All steps/);
 });
@@ -262,7 +262,7 @@ test("content UI stays open with Retry until broker delivery is acknowledged", a
   assert.equal(panel.isConnected, false);
 });
 
-test("Pause & interact returns site ownership and Resume annotation restores annotation mode", async () => {
+test("Interact with page returns site ownership and Resume annotation restores annotation mode", async () => {
   const harness = createHarness();
   harness.runtimeListener(
     { type: "START_ANNOTATION", sessionId: "session_abcdefghijkl" },

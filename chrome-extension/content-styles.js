@@ -189,7 +189,10 @@
 
     .pi-note-card {
       position: fixed;
-      width: 280px;
+      display: flex;
+      flex-direction: column;
+      width: min(280px, calc(100vw - 32px));
+      max-height: calc(100vh - 32px);
       background: var(--pi-bg-card);
       border: 1px solid var(--pi-border-muted);
       border-radius: 8px;
@@ -218,6 +221,7 @@
       background: var(--pi-bg-elevated);
       border-bottom: 1px solid var(--pi-border-muted);
       cursor: grab;
+      flex-shrink: 0;
     }
 
     .pi-note-badge {
@@ -273,6 +277,8 @@
 
     .pi-note-body {
       padding: 10px;
+      min-height: 0;
+      overflow: auto;
     }
 
     .pi-note-textarea {
@@ -751,7 +757,254 @@
     .pi-modal-actions,
     .pi-abort-actions { display: flex; justify-content: flex-end; gap: 8px; }
 
+    /* Filmstrip + composer production layout. The controller remains rooted
+       at #pi-panel so mode, capture, and delivery state stay centralized. */
+    #pi-panel {
+      left: 16px;
+      right: 16px;
+      bottom: 16px;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      gap: 8px;
+      padding: 0;
+      border: 0;
+      border-radius: 0;
+      background: transparent;
+      box-shadow: none;
+      pointer-events: none;
+    }
+
+    #pi-panel > * { pointer-events: auto; }
+
+    .pi-step-strip,
+    .pi-composer {
+      width: min(1120px, calc(100vw - 32px));
+      border: 1px solid var(--pi-border-muted);
+      background: color-mix(in srgb, var(--pi-bg-card) 94%, transparent);
+      color: var(--pi-fg);
+      box-shadow: 0 12px 38px var(--pi-shadow);
+      backdrop-filter: blur(18px);
+    }
+
+    .pi-step-strip {
+      display: flex;
+      align-items: center;
+      gap: 6px;
+      min-width: 0;
+      padding: 6px;
+      border-radius: 16px;
+    }
+
+    .pi-grinsekatze-icon {
+      display: block;
+      flex: none;
+      width: 34px;
+      height: 34px;
+      border: 1px solid var(--pi-border-muted);
+      border-radius: 9px;
+      background: #fcfaf5;
+    }
+
+    .pi-filmstrip {
+      flex: 1 1 auto;
+      min-width: 72px;
+      overflow-x: auto;
+      overscroll-behavior-x: contain;
+      scrollbar-width: thin;
+    }
+
+    .pi-step-filter {
+      min-height: 44px;
+      border-radius: 10px;
+    }
+
+    .pi-step-filter > span:not(.pi-step-thumbnail, .pi-step-hidden) {
+      white-space: nowrap;
+    }
+
+    .pi-step-filter > span:last-child:not(.pi-step-hidden) {
+      color: var(--pi-fg-dim);
+      font-size: 10px;
+    }
+
+    .pi-icon-button,
+    .pi-advanced > summary {
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      flex: none;
+      width: 34px;
+      height: 34px;
+      padding: 0;
+      border: 0;
+      border-radius: 9px;
+      background: transparent;
+      color: var(--pi-fg-muted);
+      cursor: pointer;
+      font: 700 14px var(--pi-font-ui);
+      list-style: none;
+    }
+
+    .pi-advanced > summary::-webkit-details-marker { display: none; }
+    .pi-icon-button:hover,
+    .pi-advanced > summary:hover { background: var(--pi-bg-hover); color: var(--pi-fg); }
+    .pi-close:hover { color: var(--pi-error); }
+    .pi-advanced { position: relative; flex: none; }
+    .pi-advanced.pi-debug-enabled > summary {
+      color: var(--pi-warning);
+      box-shadow: inset 0 0 0 1px var(--pi-warning);
+    }
+
+    .pi-advanced-menu {
+      position: absolute;
+      right: 0;
+      bottom: calc(100% + 10px);
+      min-width: 170px;
+      padding: 10px 12px;
+      border: 1px solid var(--pi-border-muted);
+      border-radius: 10px;
+      background: var(--pi-bg-card);
+      box-shadow: 0 10px 30px var(--pi-shadow);
+    }
+
+    .pi-composer {
+      display: flex;
+      align-items: stretch;
+      gap: 7px;
+      width: min(760px, calc(100vw - 32px));
+      min-height: 66px;
+      padding: 7px;
+      border-radius: 16px;
+    }
+
+    .pi-composer textarea {
+      min-width: 80px;
+      flex: 1 1 auto;
+      height: 50px;
+      resize: none;
+      padding: 7px 9px;
+      border: 1px solid transparent;
+      border-radius: 9px;
+      background: transparent;
+      color: var(--pi-fg);
+      font: 12px/18px var(--pi-font-ui);
+    }
+
+    .pi-composer textarea:focus {
+      outline: none;
+      border-color: var(--pi-accent);
+      box-shadow: 0 0 0 3px var(--pi-focus-ring);
+      background: var(--pi-bg-body);
+    }
+
+    .pi-composer-status {
+      display: flex;
+      flex: 0 1 180px;
+      min-width: 0;
+      flex-direction: column;
+      justify-content: center;
+    }
+
+    .pi-composer-status:empty { display: none; }
+    .pi-delivery-error { max-width: 180px; }
+    .pi-composer .pi-btn-submit { min-width: 96px; border-radius: 10px; }
+    .pi-composer .pi-etch-toggle {
+      position: relative;
+      flex: none;
+      align-self: stretch;
+      justify-content: center;
+      min-width: 68px;
+      border-radius: 10px;
+    }
+
+    .pi-etch-toggle input {
+      display: block;
+      position: absolute;
+      width: 1px;
+      height: 1px;
+      opacity: 0;
+    }
+
+    .pi-etch-toggle:focus-within {
+      outline: 3px solid var(--pi-border);
+      outline-offset: 2px;
+    }
+
+    #pi-undo[hidden] { display: none; }
+    #pi-panel.pi-minimized,
+    #pi-panel.pi-interacting {
+      display: block;
+      left: auto;
+      right: 20px;
+      bottom: 20px;
+      padding: 0;
+      pointer-events: auto;
+    }
+
+    #pi-panel.pi-minimized {
+      border: 0;
+      background: transparent;
+      box-shadow: none;
+    }
+
+    #pi-panel.pi-minimized .pi-minimized-bubble {
+      border: 1px solid var(--pi-border-muted);
+      background: var(--pi-bg-card);
+      box-shadow: 0 4px 24px var(--pi-shadow);
+    }
+
+    .pi-bubble-logo { width: 30px; height: 30px; border-radius: 8px; }
+
+    .pi-help-dialog {
+      box-sizing: border-box;
+      max-height: calc(100vh - 40px);
+      overflow: auto;
+      border-radius: 16px;
+    }
+
+    .pi-help-header { display: flex; align-items: flex-start; gap: 12px; }
+    .pi-help-header > div { min-width: 0; flex: 1; }
+    .pi-help-header h2 { margin-top: 1px; }
+    .pi-help-header p { margin-bottom: 0; }
+    .pi-help-close { margin-left: auto; }
+    .pi-help-steps { display: grid; gap: 8px; padding: 0; margin: 18px 0; list-style: none; }
+    .pi-help-steps li {
+      display: grid;
+      gap: 3px;
+      padding: 10px;
+      border-radius: 10px;
+      background: var(--pi-bg-elevated);
+    }
+    .pi-help-steps strong { font-size: 12px; }
+    .pi-help-steps span { color: var(--pi-fg-muted); font-size: 11px; line-height: 1.45; }
+    .pi-help-tip { padding-top: 12px; border-top: 1px solid var(--pi-border-muted); }
+    .pi-help-tip kbd {
+      padding: 2px 5px;
+      border: 1px solid var(--pi-border-muted);
+      border-radius: 5px;
+      background: var(--pi-bg-elevated);
+      font-family: var(--pi-font-mono);
+    }
+
+    @media (max-width: 640px) {
+      #pi-panel { left: 8px; right: 8px; bottom: 8px; gap: 6px; }
+      .pi-step-strip,
+      .pi-composer { width: calc(100vw - 16px); }
+      .pi-grinsekatze-icon { width: 30px; height: 30px; }
+      .pi-step-strip { gap: 4px; padding: 5px; }
+      .pi-step-strip { overflow-x: auto; overscroll-behavior-x: contain; }
+      .pi-step-strip .pi-filmstrip { flex: none; min-width: auto; overflow: visible; }
+      .pi-btn-pause { padding-inline: 8px; }
+      .pi-composer { min-height: 58px; padding: 5px; }
+      .pi-composer textarea { height: 46px; padding-inline: 6px; }
+      .pi-composer .pi-etch-toggle { min-width: 52px; padding-inline: 6px; }
+      .pi-composer .pi-btn-submit { min-width: 72px; padding-inline: 8px; }
+      .pi-composer-status { display: none; }
+    }
+
     #pi-panel button:focus-visible,
+    #pi-panel summary:focus-visible,
     #pi-panel textarea:focus-visible,
     .pi-modal button:focus-visible,
     .pi-abort-backdrop button:focus-visible {

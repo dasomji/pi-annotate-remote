@@ -121,6 +121,7 @@ A session remains available until `/annotate off`, Pi exits, or its broker conne
 | Review the workflow | Choose **All steps** or an individual step in the viewport filmstrip |
 | Delete and restore evidence | Delete from its note card; use **Undo delete** to restore it in place |
 | Cycle ancestors | `Alt/⌥` + scroll while hovering |
+| Retarget an Element annotation | Use ▲/▼ in its card to move along the exact original DOM branch; controls become read-only after its Interaction step closes |
 | Add a comment | Type in the floating note card |
 | Minimize the bar | Click `−`; drag the floating π bubble and click it to restore |
 | Record browser edits | Enable **Etch**; recording pauses while the site is interactive |

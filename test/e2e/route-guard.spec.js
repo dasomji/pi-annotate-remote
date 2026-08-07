@@ -2,7 +2,7 @@ import { test, expect } from "./fixtures/extension.js";
 
 async function makeDraftDirty(page) {
   await page.locator("#pi-context").fill("Protect this draft");
-  await page.getByRole("button", { name: "Pause & interact" }).click();
+  await page.getByRole("button", { name: "Interact with page" }).click();
   await expect(page.getByRole("button", { name: "Resume annotation" })).toBeVisible();
 }
 

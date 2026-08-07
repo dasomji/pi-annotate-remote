@@ -2,12 +2,12 @@ import { test, expect } from "./fixtures/extension.js";
 import { annotate } from "./helpers/annotation.js";
 
 async function createSecondStep(page) {
-  await page.getByRole("button", { name: "Pause & interact" }).click();
+  await page.getByRole("button", { name: "Interact with page" }).click();
   const resume = page.getByRole("button", { name: "Resume annotation" });
   await expect(resume).toBeVisible();
   await page.locator("#open-transient").click();
   await resume.click();
-  await expect(page.getByRole("button", { name: "Pause & interact" })).toBeVisible();
+  await expect(page.getByRole("button", { name: "Interact with page" })).toBeVisible();
   return annotate(page, "#state-two", "Second-step annotation");
 }
 
@@ -34,6 +34,89 @@ test("consecutive selections retain accepted-click order within one step", async
   ]);
 });
 
+test("Element annotation arrows retrace the exact DOM branch and deliver the retargeted evidence", async ({ workflow }) => {
+  const { page, server } = workflow;
+  const focusedNote = await annotate(page, "#state-one", "Keep this comment while retargeting");
+  const annotationId = await focusedNote.getAttribute("data-annotation-id");
+  const note = page.locator(`[data-annotation-id="${annotationId}"]`);
+  const moveUp = note.getByRole("button", { name: "Move Element annotation to parent" });
+  const moveDown = note.getByRole("button", { name: "Move Element annotation toward original element" });
+
+  await expect(moveUp).toBeEnabled();
+  await expect(moveDown).toBeDisabled();
+  await expect(moveDown).toHaveAttribute("title", "Already at the original element");
+
+  await moveUp.click();
+  await expect(note.locator(".pi-note-selector")).toHaveText("main");
+  await expect(moveDown).toBeEnabled();
+
+  await moveDown.click();
+  await expect(note.locator(".pi-note-selector")).toHaveText("#state-one");
+
+  await moveUp.click();
+  await expect(note.locator(".pi-note-selector")).toHaveText("main");
+  await submit(page);
+
+  await expect.poll(() => server.state.annotations.length).toBe(1);
+  const element = server.state.annotations[0].steps[0].elements[0];
+  expect(element.id).toBe(annotationId);
+  expect(element.comment).toBe("Keep this comment while retargeting");
+  expect(element.metadata).toMatchObject({ selector: "main", tag: "main" });
+  expect(element.cropImage.status).toBe("captured");
+});
+
+test("DOM navigation remains visible but disabled after its interaction step closes", async ({ workflow }) => {
+  const { page } = workflow;
+  const focusedNote = await annotate(page, "#state-one", "Closed-step target");
+  const annotationId = await focusedNote.getAttribute("data-annotation-id");
+  const note = page.locator(`[data-annotation-id="${annotationId}"]`);
+  await page.getByRole("button", { name: "Interact with page" }).click();
+  await page.getByRole("button", { name: "Resume annotation" }).click();
+
+  const moveUp = note.getByRole("button", { name: "Move Element annotation to parent" });
+  const moveDown = note.getByRole("button", { name: "Move Element annotation toward original element" });
+  const reason = "Element cannot be changed after its interaction step is closed";
+  await expect(moveUp).toBeVisible();
+  await expect(moveDown).toBeVisible();
+  await expect(moveUp).toBeDisabled();
+  await expect(moveDown).toBeDisabled();
+  await expect(moveUp).toHaveAttribute("title", reason);
+  await expect(moveDown).toHaveAttribute("title", reason);
+});
+
+test("an Element annotation card stays fully inside the viewport near the bottom edge", async ({ workflow }) => {
+  const { page } = workflow;
+  await page.locator("#state-one").evaluate((element) => {
+    Object.assign(element.style, {
+      position: "fixed",
+      left: "0",
+      bottom: "0",
+      width: "24px",
+      padding: "0",
+      zIndex: "1",
+    });
+  });
+
+  await page.locator("#state-one").click();
+  const card = page.locator(".pi-note-card").last();
+  await expect(card).toBeVisible();
+  const bounds = await card.boundingBox();
+  const viewport = page.viewportSize();
+
+  expect(bounds).not.toBeNull();
+  expect(bounds.y).toBeGreaterThanOrEqual(0);
+  expect(bounds.y + bounds.height).toBeLessThanOrEqual(viewport.height);
+
+  await page.setViewportSize({ width: 320, height: 320 });
+  await expect.poll(async () => {
+    const resized = await card.boundingBox();
+    return resized !== null &&
+      resized.x >= 0 && resized.y >= 0 &&
+      resized.x + resized.width <= 320 &&
+      resized.y + resized.height <= 320;
+  }).toBe(true);
+});
+
 test("step filtering defaults to the current step and preserves other evidence", async ({ workflow }) => {
   const { page } = workflow;
   await annotate(page, "#state-one", "First-step annotation");
@@ -41,10 +124,13 @@ test("step filtering defaults to the current step and preserves other evidence",
   const stepButtons = page.locator("#pi-filmstrip .pi-step-filter[data-step]:not([data-step='all'])");
   await expect(stepButtons).toHaveCount(1);
   await expect(stepButtons.first()).toHaveAttribute("aria-pressed", "true");
+  await expect(stepButtons.first()).toHaveAttribute("aria-label", "Step 1, 1 element annotations");
+  expect(await stepButtons.first().locator("img").evaluate((image) => image.naturalWidth)).toBeGreaterThan(0);
   await createSecondStep(page);
 
   await expect(stepButtons).toHaveCount(2);
   await expect(stepButtons.nth(1)).toHaveAttribute("aria-pressed", "true");
+  await expect(stepButtons.nth(1)).toHaveAttribute("aria-label", "Step 2, 1 element annotations");
   await expect(page.locator("#pi-markers .pi-marker-badge")).toHaveCount(1);
   await expect(stepButtons.first().getByLabel("Hidden by step filter")).toBeVisible();
 
@@ -127,6 +213,7 @@ test("deleting a last element removes its step and Undo restores assets and orig
   await expect(page.getByRole("button", { name: "Undo delete" })).toBeEnabled();
 
   await page.getByRole("button", { name: "Undo delete" }).click();
+  await expect(page.getByRole("button", { name: "Undo delete" })).toBeHidden();
   await expect(stepButtons).toHaveCount(2);
   await expect(stepButtons.nth(1).locator("img.pi-step-thumbnail")).toHaveAttribute("src", secondThumbnail);
   await expect(page.locator(".pi-note-card").last().locator(".pi-note-textarea"))
@@ -193,19 +280,20 @@ test("Escape cannot dismiss or strand a failed capture transaction", async ({ wo
   await page.locator("#state-one").click();
   const failure = page.getByRole("dialog", { name: "Screenshot capture failed" });
   await expect(failure).toBeVisible();
+  await expect(page.locator("#pi-panel")).toHaveAttribute("aria-busy", "true");
   await page.keyboard.press("Escape");
 
   await expect(failure).toBeVisible();
-  await expect(page.getByRole("button", { name: "Pause & interact" })).toBeDisabled();
+  await expect(page.getByRole("button", { name: "Interact with page" })).toBeDisabled();
   await failure.getByRole("button", { name: "Discard" }).click();
   await expect(failure).toHaveCount(0);
-  await expect(page.getByRole("button", { name: "Pause & interact" })).toBeEnabled();
+  await expect(page.getByRole("button", { name: "Interact with page" })).toBeEnabled();
 });
 
 test("modal focus is trapped and returns to the invoking control", async ({ workflow }) => {
   const { page } = workflow;
-  const cancel = page.getByRole("button", { name: "Cancel", exact: true });
-  await cancel.focus();
+  const close = page.getByRole("button", { name: "Cancel annotation" });
+  await close.focus();
   await page.keyboard.press("Escape");
   await page.keyboard.press("Escape");
   await page.keyboard.press("Escape");
@@ -222,7 +310,7 @@ test("modal focus is trapped and returns to the invoking control", async ({ work
   await expect(continueButton).toBeFocused();
   await page.keyboard.press("Escape");
   await expect(dialog).toBeHidden();
-  await expect(cancel).toBeFocused();
+  await expect(close).toBeFocused();
 });
 
 test("a route attempted during capture waits for the atomic transaction before asking", async ({ workflow }) => {

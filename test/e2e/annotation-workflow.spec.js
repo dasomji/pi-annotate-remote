@@ -46,14 +46,12 @@ test("pause and resume return input to the page without creating empty or reorde
   const { page, server } = workflow;
 
   await annotate(page, "#state-one", "First state");
-  await page.getByRole("button", { name: "Pause & interact" }).click();
+  await page.getByRole("button", { name: "Interact with page" }).click();
 
   const resume = page.getByRole("button", { name: "Resume annotation" });
   await expect(resume).toBeVisible();
-  await expect(page.locator("#pi-panel .pi-header")).toBeHidden();
-  await expect(page.locator("#pi-panel .pi-toolbar")).toBeHidden();
-  await expect(page.locator("#pi-panel .pi-context-row")).toBeHidden();
-  await expect(page.locator("#pi-panel .pi-actions")).toBeHidden();
+  await expect(page.getByRole("navigation", { name: "Interaction steps" })).toBeHidden();
+  await expect(page.getByRole("group", { name: "Annotation composer" })).toBeHidden();
   await expect(page.locator("#pi-markers")).toBeHidden();
   await expect(page.locator(".pi-notes-container")).toBeHidden();
   await page.locator("#site-input").fill("the site owns input");
@@ -61,11 +59,11 @@ test("pause and resume return input to the page without creating empty or reorde
   await expect(page.getByRole("dialog", { name: "Transient site UI" })).toBeVisible();
 
   await resume.click();
-  await expect(page.getByRole("button", { name: "Pause & interact" })).toBeVisible();
+  await expect(page.getByRole("button", { name: "Interact with page" })).toBeVisible();
   await annotate(page, "#state-two", "Second transient state");
 
   // A bare pause/resume boundary must not append an empty third step.
-  await page.getByRole("button", { name: "Pause & interact" }).click();
+  await page.getByRole("button", { name: "Interact with page" }).click();
   await page.getByRole("button", { name: "Resume annotation" }).click();
   await submit(page);
 
@@ -143,7 +141,7 @@ test("submit delivers an Etch finalization warning when its screenshot fails", a
 
 test("Pause and Resume expose keyboard-operable, mode-specific controls with visible focus", async ({ workflow }) => {
   const { page } = workflow;
-  const pause = page.getByRole("button", { name: "Pause & interact" });
+  const pause = page.getByRole("button", { name: "Interact with page" });
 
   await pause.focus();
   await expect(pause).toBeFocused();
@@ -169,20 +167,20 @@ test("Etch records ordered annotation periods but excludes the paused mutation p
   await page.locator("#state-one").evaluate((element) => {
     element.style.color = "rgb(200, 0, 0)";
   });
-  await page.getByRole("button", { name: "Pause & interact" }).click();
+  await page.getByRole("button", { name: "Interact with page" }).click();
   await expect(page.getByRole("button", { name: "Resume annotation" })).toBeVisible();
 
   await page.locator("#state-one").evaluate((element) => {
     element.style.color = "rgb(0, 0, 200)";
   });
   await page.getByRole("button", { name: "Resume annotation" }).click();
-  await expect(page.getByRole("button", { name: "Pause & interact" })).toBeVisible();
+  await expect(page.getByRole("button", { name: "Interact with page" })).toBeVisible();
   await expect(page.locator("#pi-etch-mode")).toBeChecked();
   await page.locator("#state-one").evaluate((element) => {
     element.style.color = "rgb(0, 140, 0)";
   });
   await expect(page.locator("#pi-etch-count")).toHaveText(/^[1-9]\d*$/);
-  await page.getByRole("button", { name: "Pause & interact" }).click();
+  await page.getByRole("button", { name: "Interact with page" }).click();
   await expect(page.getByRole("button", { name: "Resume annotation" })).toBeVisible();
   await page.getByRole("button", { name: "Resume annotation" }).click();
   await submit(page);

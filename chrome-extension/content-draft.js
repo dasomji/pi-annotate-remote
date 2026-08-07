@@ -165,6 +165,66 @@
       return transaction;
     }
 
+    function beginRetarget({ id, sourceNode, metadata, cropRect = metadata?.rect, url, viewport }) {
+      if (typeof id !== "string" || !sourceNode || !metadata || typeof url !== "string" || !viewport) {
+        throw new TypeError("Retarget capture requires an annotation ID, source node, metadata, URL, and viewport");
+      }
+
+      if (capture?.state === "capturing") return { status: "busy" };
+
+      if (capture?.state === "failed") {
+        if (capture.transaction.retargetId !== id || capture.sourceNode !== sourceNode) {
+          return { status: "busy" };
+        }
+        if (capture.transaction.attempt >= 3) {
+          return { status: "attempts-exhausted", transaction: capture.transaction };
+        }
+        if (sourceNode.isConnected === false) {
+          return { status: "source-disconnected", transaction: capture.transaction };
+        }
+        const transaction = Object.freeze({
+          draftToken: token,
+          id,
+          retargetId: id,
+          stepId: capture.transaction.stepId,
+          attempt: capture.transaction.attempt + 1,
+          sourceNode,
+          metadata: deepFreeze(clone(metadata)),
+          cropRect: deepFreeze(clone(cropRect)),
+          url,
+          viewport: deepFreeze(clone(viewport)),
+          createsStep: false,
+        });
+        capture = { state: "capturing", sourceNode, transaction };
+        return transaction;
+      }
+
+      const found = locateElement(id);
+      if (!found || found.element.deleted || stepBoundaryArmed || found.step !== activeStep) {
+        return { status: "step-closed" };
+      }
+      const duplicate = found.step.elements.find(
+        (element) => !element.deleted && element.id !== id && element.sourceNode === sourceNode,
+      );
+      if (duplicate) return { status: "target-already-annotated", id: duplicate.id };
+
+      const transaction = Object.freeze({
+        draftToken: token,
+        id,
+        retargetId: id,
+        stepId: found.step.id,
+        attempt: 1,
+        sourceNode,
+        metadata: deepFreeze(clone(metadata)),
+        cropRect: deepFreeze(clone(cropRect)),
+        url,
+        viewport: deepFreeze(clone(viewport)),
+        createsStep: false,
+      });
+      capture = { state: "capturing", sourceNode, transaction };
+      return transaction;
+    }
+
     function commit(transaction, { viewportImage, cropImage }, incomplete) {
       assertCurrent(transaction);
       if (!isImageResult(viewportImage) || !isImageResult(cropImage)) {
@@ -191,6 +251,25 @@
       }
       if (incomplete && complete) {
         throw new TypeError("Incomplete commits must identify missing evidence");
+      }
+
+      if (transaction.retargetId) {
+        const found = locateElement(transaction.retargetId);
+        if (!found || found.element.deleted || found.step !== activeStep || stepBoundaryArmed) {
+          throw new Error("Retarget capture targets a closed interaction step");
+        }
+        found.element.sourceNode = transaction.sourceNode;
+        found.element.historical = transaction.sourceNode.isConnected === false;
+        found.element.metadata = clone(transaction.metadata);
+        found.element.cropImage = clone(cropImage);
+        capture = null;
+        return {
+          status: "committed",
+          stepId: found.step.id,
+          id: found.element.id,
+          incomplete,
+          retargeted: true,
+        };
       }
 
       let step = activeStep;
@@ -242,6 +321,16 @@
       stepBoundaryArmed = true;
       activeStep = null;
       return true;
+    }
+
+    function isCurrentStep(id) {
+      if (stepBoundaryArmed || !activeStep) return false;
+      const found = locateElement(id);
+      return Boolean(found && !found.element.deleted && found.step === activeStep);
+    }
+
+    function canRetarget(id) {
+      return !capture && isCurrentStep(id);
     }
 
     function findBySource(sourceNode) {
@@ -411,6 +500,9 @@
     return {
       armStepBoundary,
       beginCapture,
+      beginRetarget,
+      canRetarget,
+      isCurrentStep,
       commitCapture,
       commitIncomplete,
       discardCapture,
