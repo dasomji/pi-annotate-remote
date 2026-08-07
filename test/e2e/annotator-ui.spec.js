@@ -26,6 +26,28 @@ test("the annotator presents a filmstrip above a focused composer", async ({ wor
   expect(stripBounds.y + stripBounds.height).toBeLessThanOrEqual(composerBounds.y);
 });
 
+test("the step bar matches the composer width and scrolls only its filmstrip as steps accumulate", async ({ workflow }) => {
+  const { page } = workflow;
+  const steps = page.getByRole("navigation", { name: "Interaction steps" });
+  const composer = page.getByRole("group", { name: "Annotation composer" });
+  const filmstrip = page.locator(".pi-filmstrip");
+  const initialStepBounds = await steps.boundingBox();
+  const composerBounds = await composer.boundingBox();
+
+  expect(Math.abs(initialStepBounds.width - composerBounds.width)).toBeLessThan(1);
+  await annotate(page, "#state-one", "Step one");
+  for (let step = 2; step <= 7; step += 1) {
+    await page.getByRole("button", { name: "Interact with page" }).click();
+    await page.getByRole("button", { name: "Resume annotation" }).click();
+    await annotate(page, "#state-one", `Step ${step}`);
+  }
+
+  const finalStepBounds = await steps.boundingBox();
+  expect(Math.abs(finalStepBounds.width - initialStepBounds.width)).toBeLessThan(1);
+  expect(await filmstrip.evaluate((element) => element.scrollWidth > element.clientWidth)).toBe(true);
+  expect(await steps.evaluate((element) => element.scrollWidth <= element.clientWidth)).toBe(true);
+});
+
 test("help explains the workflow and dismisses without advancing abort", async ({ workflow }) => {
   const { page } = workflow;
   const help = page.getByRole("button", { name: "How to annotate" });
@@ -114,7 +136,7 @@ test("bars, help, and Element annotation cards remain usable in a narrow short v
   await expect(secondStep).toHaveAttribute("aria-pressed", "true");
   await secondStep.focus();
   await expect(secondStep).toBeFocused();
-  expect(await page.locator(".pi-step-strip").evaluate((stripElement) =>
+  expect(await page.locator(".pi-filmstrip").evaluate((stripElement) =>
     stripElement.scrollWidth > stripElement.clientWidth)).toBe(true);
 
   await page.getByRole("button", { name: "How to annotate" }).click();

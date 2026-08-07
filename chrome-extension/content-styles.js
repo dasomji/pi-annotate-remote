@@ -833,7 +833,7 @@
 
     .pi-step-strip,
     .pi-composer {
-      width: min(1120px, calc(100vw - 32px));
+      width: min(760px, calc(100vw - 32px));
       border: 1px solid var(--pi-border-muted);
       background: color-mix(in srgb, var(--pi-bg-card) 94%, transparent);
       color: var(--pi-fg);
@@ -926,7 +926,6 @@
       display: flex;
       align-items: stretch;
       gap: 7px;
-      width: min(760px, calc(100vw - 32px));
       min-height: 66px;
       padding: 7px;
       border-radius: 16px;
@@ -1049,8 +1048,7 @@
       .pi-composer { width: calc(100vw - 16px); }
       .pi-grinsekatze-icon { width: 30px; height: 30px; }
       .pi-step-strip { gap: 4px; padding: 5px; }
-      .pi-step-strip { overflow-x: auto; overscroll-behavior-x: contain; }
-      .pi-step-strip .pi-filmstrip { flex: none; min-width: auto; overflow: visible; }
+      .pi-step-strip .pi-filmstrip { min-width: 0; }
       .pi-btn-pause { padding-inline: 8px; }
       .pi-composer { min-height: 58px; padding: 5px; }
       .pi-composer textarea { height: 46px; padding-inline: 6px; }
