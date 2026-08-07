@@ -104,6 +104,11 @@ test("bars, help, and Element annotation cards remain usable in a narrow short v
   await page.getByRole("button", { name: "Interact with page" }).click();
   await page.locator("#open-transient").click();
   await page.getByRole("button", { name: "Resume annotation" }).click();
+  await page.locator("#state-two").evaluate((element) => {
+    Object.assign(element.style, {
+      position: "fixed", left: "296px", top: "0", width: "20px", padding: "0", zIndex: "1",
+    });
+  });
   await annotate(page, "#state-two", "Second narrow step");
   const secondStep = page.getByRole("button", { name: "Step 2, 1 element annotations" });
   await expect(secondStep).toHaveAttribute("aria-pressed", "true");
@@ -118,4 +123,18 @@ test("bars, help, and Element annotation cards remain usable in a narrow short v
   expect(helpBox.y).toBeGreaterThanOrEqual(0);
   expect(helpBox.x + helpBox.width).toBeLessThanOrEqual(viewport.width);
   expect(helpBox.y + helpBox.height).toBeLessThanOrEqual(viewport.height);
+});
+
+test("delivery feedback remains visible with the draft at narrow widths", async ({ workflow }) => {
+  const { page, server } = workflow;
+  server.state.failDeliveries = 1;
+  await page.setViewportSize({ width: 320, height: 320 });
+  const context = page.getByRole("textbox", { name: "General context" });
+  await context.fill("Keep narrow delivery context");
+
+  await page.getByRole("button", { name: "Submit" }).click();
+
+  await expect(page.getByRole("alert")).toContainText("Intentional E2E delivery failure");
+  await expect(context).toHaveValue("Keep narrow delivery context");
+  await expect(page.getByRole("button", { name: "Retry" })).toBeVisible();
 });

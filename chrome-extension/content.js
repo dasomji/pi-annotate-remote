@@ -360,13 +360,7 @@
     const result = draft.commitCapture(transaction, { viewportImage, cropImage });
     operation = "idle";
     if (result.status === "committed") {
-      commitRecord(result, transaction, failedCapture?.navigationTarget);
-      selectCreatedStep(transaction, result);
-      failedCapture = null;
-      settleCaptureLifecycle();
-      deliveryConfirmedDegraded = false;
-      render();
-      createNote(result.id);
+      finalizeCommittedCapture(result, transaction, failedCapture?.navigationTarget);
       return;
     }
     failedCapture = {
@@ -377,13 +371,7 @@
     };
     if (transaction.attempt >= 3) {
       const committed = draft.commitIncomplete(transaction, { viewportImage, cropImage });
-      commitRecord(committed, transaction, failedCapture?.navigationTarget);
-      selectCreatedStep(transaction, committed);
-      failedCapture = null;
-      settleCaptureLifecycle();
-      deliveryConfirmedDegraded = false;
-      render();
-      createNote(committed.id);
+      finalizeCommittedCapture(committed, transaction, failedCapture?.navigationTarget);
       return;
     }
     showCaptureFailure(false);
@@ -427,6 +415,16 @@
 
   function selectCreatedStep(transaction, result) {
     if (transaction.createsStep) stepFilter = result.stepId;
+  }
+
+  function finalizeCommittedCapture(result, transaction, navigationTarget) {
+    commitRecord(result, transaction, navigationTarget);
+    selectCreatedStep(transaction, result);
+    failedCapture = null;
+    settleCaptureLifecycle();
+    deliveryConfirmedDegraded = false;
+    render();
+    createNote(result.id);
   }
 
   function commitRecord(result, transaction, navigationTarget) {
@@ -1041,10 +1039,6 @@
       panelEl.style.top = `${bubblePosition.y}px`;
     }
     renderEvidence();
-    notesEl?.querySelectorAll?.(".pi-note-card").forEach((card) => {
-      const bounds = card.getBoundingClientRect();
-      placeNoteCard(card, { left: bounds.left, top: bounds.top });
-    });
   }
 
   function onPageMutations(mutations) {

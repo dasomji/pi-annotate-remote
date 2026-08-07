@@ -99,6 +99,26 @@
       }
     }
 
+    function createCaptureTransaction({
+      id, retargetId, stepId, attempt, sourceNode, metadata, cropRect, url, viewport, createsStep,
+    }) {
+      const transaction = Object.freeze({
+        draftToken: token,
+        id,
+        ...(retargetId ? { retargetId } : {}),
+        stepId,
+        attempt,
+        sourceNode,
+        metadata: deepFreeze(clone(metadata)),
+        cropRect: deepFreeze(clone(cropRect)),
+        url,
+        viewport: deepFreeze(clone(viewport)),
+        createsStep,
+      });
+      capture = { state: "capturing", sourceNode, transaction };
+      return transaction;
+    }
+
     function beginCapture({ sourceNode, metadata, cropRect = metadata?.rect, url, viewport }) {
       if (!sourceNode || !metadata || typeof url !== "string" || !viewport) {
         throw new TypeError("Capture requires a source node, metadata, URL, and viewport");
@@ -117,20 +137,17 @@
           return { status: "source-disconnected", transaction: capture.transaction };
         }
 
-        const transaction = Object.freeze({
-          draftToken: token,
+        return createCaptureTransaction({
           id: capture.transaction.id,
           stepId: capture.transaction.stepId,
           attempt: capture.transaction.attempt + 1,
           sourceNode,
-          metadata: deepFreeze(clone(metadata)),
-          cropRect: deepFreeze(clone(cropRect)),
+          metadata,
+          cropRect,
           url,
-          viewport: deepFreeze(clone(viewport)),
+          viewport,
           createsStep: capture.transaction.createsStep,
         });
-        capture = { state: "capturing", sourceNode, transaction };
-        return transaction;
       }
 
       if (!stepBoundaryArmed && activeStep) {
@@ -149,20 +166,17 @@
 
       const createsStep = stepBoundaryArmed || !activeStep;
       const stepId = createsStep ? createId() : activeStep.id;
-      const transaction = Object.freeze({
-        draftToken: token,
+      return createCaptureTransaction({
         id: createId(),
         stepId,
         attempt: 1,
         sourceNode,
-        metadata: deepFreeze(clone(metadata)),
-        cropRect: deepFreeze(clone(cropRect)),
+        metadata,
+        cropRect,
         url,
-        viewport: deepFreeze(clone(viewport)),
+        viewport,
         createsStep,
       });
-      capture = { state: "capturing", sourceNode, transaction };
-      return transaction;
     }
 
     function beginRetarget({ id, sourceNode, metadata, cropRect = metadata?.rect, url, viewport }) {
@@ -182,21 +196,18 @@
         if (sourceNode.isConnected === false) {
           return { status: "source-disconnected", transaction: capture.transaction };
         }
-        const transaction = Object.freeze({
-          draftToken: token,
+        return createCaptureTransaction({
           id,
           retargetId: id,
           stepId: capture.transaction.stepId,
           attempt: capture.transaction.attempt + 1,
           sourceNode,
-          metadata: deepFreeze(clone(metadata)),
-          cropRect: deepFreeze(clone(cropRect)),
+          metadata,
+          cropRect,
           url,
-          viewport: deepFreeze(clone(viewport)),
+          viewport,
           createsStep: false,
         });
-        capture = { state: "capturing", sourceNode, transaction };
-        return transaction;
       }
 
       const found = locateElement(id);
@@ -208,21 +219,18 @@
       );
       if (duplicate) return { status: "target-already-annotated", id: duplicate.id };
 
-      const transaction = Object.freeze({
-        draftToken: token,
+      return createCaptureTransaction({
         id,
         retargetId: id,
         stepId: found.step.id,
         attempt: 1,
         sourceNode,
-        metadata: deepFreeze(clone(metadata)),
-        cropRect: deepFreeze(clone(cropRect)),
+        metadata,
+        cropRect,
         url,
-        viewport: deepFreeze(clone(viewport)),
+        viewport,
         createsStep: false,
       });
-      capture = { state: "capturing", sourceNode, transaction };
-      return transaction;
     }
 
     function commit(transaction, { viewportImage, cropImage }, incomplete) {

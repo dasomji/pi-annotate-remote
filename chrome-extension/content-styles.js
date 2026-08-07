@@ -906,7 +906,9 @@
       justify-content: center;
     }
 
-    .pi-composer-status:empty { display: none; }
+    .pi-composer-status:not(:has(.pi-capture-status:not(:empty), .pi-delivery-error:not([hidden]))) {
+      display: none;
+    }
     .pi-delivery-error { max-width: 180px; }
     .pi-composer .pi-btn-submit { min-width: 96px; border-radius: 10px; }
     .pi-composer .pi-etch-toggle {
@@ -1000,7 +1002,14 @@
       .pi-composer textarea { height: 46px; padding-inline: 6px; }
       .pi-composer .pi-etch-toggle { min-width: 52px; padding-inline: 6px; }
       .pi-composer .pi-btn-submit { min-width: 72px; padding-inline: 8px; }
-      .pi-composer-status { display: none; }
+      .pi-composer { flex-wrap: wrap; }
+      .pi-composer-status {
+        order: 2;
+        flex: 1 0 100%;
+        max-width: none;
+        padding: 2px 6px 4px;
+      }
+      .pi-composer-status .pi-delivery-error { max-width: none; }
     }
 
     #pi-panel button:focus-visible,
