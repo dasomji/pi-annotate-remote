@@ -44,6 +44,7 @@
   let lastFocusedControl = null;
   let routeDialog = null;
   let bubbleDrag = null;
+  let noteDrag = null;
   let bubbleDragged = false;
   let bubblePosition = null;
   let escapeCount = 0;
@@ -207,6 +208,7 @@
     debugMode = false;
     stepFilter = "all";
     activeRecordId = null;
+    noteDrag = null;
     failedCapture = null;
     deliveryError = "";
     deliveryConfirmedDegraded = false;
@@ -244,6 +246,7 @@
     styleEl = panelEl = highlightEl = markersEl = notesEl = null;
     records.clear();
     activeRecordId = null;
+    noteDrag = null;
     sessionId = null;
   }
 
@@ -438,6 +441,7 @@
         stepId: result.stepId,
         sourceNode: transaction.sourceNode,
         navigation: { path: [transaction.sourceNode], index: 0 },
+        notePosition: null,
       });
       return;
     }
@@ -781,7 +785,8 @@
       <div class="pi-note-body">
         <textarea class="pi-note-textarea" placeholder="Describe changes for this element...">${inspect.escapeHtml(element.comment)}</textarea>
       </div>`;
-    const source = records.get(id)?.sourceNode;
+    const record = records.get(id);
+    const source = record?.sourceNode;
     const rect = source?.getBoundingClientRect?.() || { right: 24, top: 24 };
     card.style.visibility = "hidden";
     card.querySelector?.(".pi-note-textarea")?.addEventListener("input", (event) => {
@@ -790,13 +795,28 @@
     card.querySelector?.(".pi-note-close")?.addEventListener("click", () => deleteRecord(id));
     card.querySelector?.(".pi-note-expand")?.addEventListener("click", () => moveElementTarget(id, "up"));
     card.querySelector?.(".pi-note-contract")?.addEventListener("click", () => moveElementTarget(id, "down"));
+    card.querySelector?.(".pi-note-header")?.addEventListener("mousedown", (event) => {
+      if (event.button !== 0 || operation !== "idle" || modal !== "none" ||
+          event.target.closest?.("button")) return;
+      const bounds = card.getBoundingClientRect();
+      noteDrag = {
+        card,
+        id,
+        startX: event.clientX,
+        startY: event.clientY,
+        startLeft: bounds.left,
+        startTop: bounds.top,
+      };
+      card.classList.add("dragging");
+      event.preventDefault();
+    });
     card.addEventListener("focusin", () => {
       if (activeRecordId === id) return;
       activeRecordId = id;
       renderEvidence();
     });
     notesEl.appendChild(card);
-    placeNoteCard(card, { left: rect.right + 16, top: rect.top });
+    placeNoteCard(card, record?.notePosition || { left: rect.right + 16, top: rect.top });
     card.style.visibility = "";
     updateNoteCard(card, element);
     if (focus) {
@@ -822,6 +842,7 @@
     const top = Math.min(Math.max(margin, preferred.top), maxTop);
     card.style.left = `${left}px`;
     card.style.top = `${top}px`;
+    return { left, top };
   }
 
   function updateHistorical(card, element) {
@@ -1037,6 +1058,15 @@
   }
 
   function onDragMove(event) {
+    if (noteDrag) {
+      const position = placeNoteCard(noteDrag.card, {
+        left: noteDrag.startLeft + event.clientX - noteDrag.startX,
+        top: noteDrag.startTop + event.clientY - noteDrag.startY,
+      });
+      const record = records.get(noteDrag.id);
+      if (record) record.notePosition = position;
+      return;
+    }
     if (!bubbleDrag || !panelEl) return;
     const dx = event.clientX - bubbleDrag.x;
     const dy = event.clientY - bubbleDrag.y;
@@ -1055,6 +1085,8 @@
 
   function endBubbleDrag() {
     bubbleDrag = null;
+    noteDrag?.card?.classList.remove("dragging");
+    noteDrag = null;
   }
 
   function onResize() {

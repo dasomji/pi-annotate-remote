@@ -134,6 +134,33 @@ test("an Element annotation card stays fully inside the viewport near the bottom
   }).toBe(true);
 });
 
+test("an Element annotation card can be dragged by its header without losing its comment", async ({ workflow }) => {
+  const { page } = workflow;
+  const card = await annotate(page, "#state-one", "Keep this while moving the card");
+  const header = card.locator(".pi-note-header");
+  const before = await card.boundingBox();
+  const handle = await header.boundingBox();
+
+  await page.mouse.move(handle.x + handle.width / 2, handle.y + handle.height / 2);
+  await page.mouse.down();
+  await page.mouse.move(handle.x + handle.width / 2 + 72, handle.y + handle.height / 2 + 48, {
+    steps: 4,
+  });
+  await page.mouse.up();
+
+  await expect.poll(async () => {
+    const after = await card.boundingBox();
+    return after && Math.abs(after.x - before.x - 72) < 2 && Math.abs(after.y - before.y - 48) < 2;
+  }).toBe(true);
+  await expect(card.locator(".pi-note-textarea")).toHaveValue("Keep this while moving the card");
+  const after = await card.boundingBox();
+  const viewport = page.viewportSize();
+  expect(after.x).toBeGreaterThanOrEqual(0);
+  expect(after.y).toBeGreaterThanOrEqual(0);
+  expect(after.x + after.width).toBeLessThanOrEqual(viewport.width);
+  expect(after.y + after.height).toBeLessThanOrEqual(viewport.height);
+});
+
 test("step filtering defaults to the current step and preserves other evidence", async ({ workflow }) => {
   const { page } = workflow;
   await annotate(page, "#state-one", "First-step annotation");
