@@ -51,6 +51,8 @@
   let escapeTimer = null;
   let livenessObserver = null;
   let livenessFrame = null;
+  let captureReturnTimer = null;
+  let captureReturnEl = null;
 
   let draft = createDraft({ createId: makeId });
   const records = new Map();
@@ -202,6 +204,7 @@
 
   function resetDraft() {
     settleCaptureLifecycle();
+    cleanupCaptureReturnAnimation();
     etch.reset();
     draft.purge();
     draft = createDraft({ createId: makeId });
@@ -229,6 +232,7 @@
     if (!active) return;
     active = false;
     settleCaptureLifecycle();
+    cleanupCaptureReturnAnimation();
     routeGuard.stop();
     if (purge) draft.purge();
     etch.reset();
@@ -370,6 +374,13 @@
     // extension chrome from the source bitmap.
     await twoFrames();
     const restore = hideChrome();
+    let returnAnimationStarted = false;
+    const restoreWithFlourish = () => {
+      restore();
+      if (returnAnimationStarted) return;
+      returnAnimationStarted = true;
+      playCaptureReturnAnimation();
+    };
     await twoFrames();
     let viewportImage;
     let cropImage;
@@ -379,7 +390,7 @@
       viewportImage = capture.capturedImage(response.dataUrl);
       // The raw viewport is already frozen, so restore progress chrome while
       // the crop is decoded and validated.
-      restore();
+      restoreWithFlourish();
       try {
         cropImage = await capture.cropToRect(response.dataUrl, {
           rect: transaction.cropRect,
@@ -393,7 +404,7 @@
       viewportImage = capture.missingImage("screenshot_failure", transaction.attempt, errorMessage(error));
       cropImage = capture.missingImage("screenshot_failure", transaction.attempt, errorMessage(error));
     } finally {
-      restore();
+      restoreWithFlourish();
     }
 
     const result = draft.commitCapture(transaction, { viewportImage, cropImage });
@@ -1117,6 +1128,33 @@
         if (element.isConnected) element.style.display = value;
       });
     };
+  }
+
+  function playCaptureReturnAnimation() {
+    cleanupCaptureReturnAnimation();
+    const flourish = document.createElement("div");
+    flourish.className = "pi-grinsekatze-rematerialize";
+    flourish.setAttribute("aria-hidden", "true");
+    const iconUrl = chrome.runtime.getURL?.("assets/grinsekatze.svg") ||
+      "assets/grinsekatze.svg";
+    flourish.innerHTML = `<span>Poof!</span><img src="${iconUrl}" alt="">`;
+    document.body.appendChild(flourish);
+    captureReturnEl = flourish;
+
+    for (const surface of [panelEl, connectorsEl, markersEl, notesEl]) {
+      if (surface?.isConnected) surface.classList.add("pi-rematerializing");
+    }
+    captureReturnTimer = setTimeout(cleanupCaptureReturnAnimation, 1100);
+  }
+
+  function cleanupCaptureReturnAnimation() {
+    if (captureReturnTimer !== null) clearTimeout(captureReturnTimer);
+    captureReturnTimer = null;
+    captureReturnEl?.remove();
+    captureReturnEl = null;
+    for (const surface of [panelEl, connectorsEl, markersEl, notesEl]) {
+      surface?.classList.remove("pi-rematerializing");
+    }
   }
 
   function twoFrames() {

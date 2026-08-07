@@ -177,6 +177,70 @@
       fill: var(--pi-accent);
     }
 
+    /* Grinsekatze rematerializes the annotator after a clean screenshot. */
+    .pi-grinsekatze-rematerialize {
+      position: fixed;
+      left: 50%;
+      top: 42%;
+      z-index: ${Z_INDEX_TOOLTIP};
+      display: grid;
+      justify-items: center;
+      gap: 6px;
+      pointer-events: none;
+      color: var(--pi-accent-hover);
+      font: 700 13px var(--pi-font-ui);
+      letter-spacing: 0.08em;
+      text-transform: uppercase;
+      filter: drop-shadow(0 0 16px rgba(138, 190, 183, 0.65));
+      animation: pi-grinsekatze-poof 1s cubic-bezier(0.16, 1, 0.3, 1) both;
+    }
+
+    .pi-grinsekatze-rematerialize img {
+      width: 76px;
+      height: 76px;
+      border-radius: 14px;
+      box-shadow: 0 0 0 2px var(--pi-accent), 0 0 28px var(--pi-accent-muted);
+    }
+
+    #pi-panel.pi-rematerializing {
+      animation: pi-panel-rematerialize 520ms cubic-bezier(0.16, 1, 0.3, 1) both;
+    }
+
+    #pi-markers.pi-rematerializing,
+    .pi-connectors.pi-rematerializing,
+    .pi-notes-container.pi-rematerializing {
+      animation: pi-evidence-rematerialize 620ms 80ms cubic-bezier(0.16, 1, 0.3, 1) both;
+    }
+
+    @keyframes pi-grinsekatze-poof {
+      0% { opacity: 0; transform: translate(-50%, -42%) scale(0.25) rotate(-12deg); filter: blur(10px); }
+      20% { opacity: 1; transform: translate(-50%, -50%) scale(1.14) rotate(3deg); filter: blur(0); }
+      58% { opacity: 1; transform: translate(-50%, -50%) scale(1) rotate(0); }
+      100% { opacity: 0; transform: translate(-50%, -72%) scale(0.82); filter: blur(2px); }
+    }
+
+    @keyframes pi-panel-rematerialize {
+      0% { opacity: 0; transform: translateY(10px) scale(0.98); filter: blur(5px); }
+      70% { opacity: 1; transform: translateY(-2px) scale(1.01); filter: blur(0); }
+      100% { opacity: 1; transform: none; filter: none; }
+    }
+
+    @keyframes pi-evidence-rematerialize {
+      0% { opacity: 0; filter: blur(5px); }
+      100% { opacity: 1; filter: none; }
+    }
+
+    @media (prefers-reduced-motion: reduce) {
+      .pi-grinsekatze-rematerialize,
+      #pi-panel.pi-rematerializing,
+      #pi-markers.pi-rematerializing,
+      .pi-connectors.pi-rematerializing,
+      .pi-notes-container.pi-rematerializing {
+        animation-duration: 1ms;
+        animation-delay: 0ms;
+      }
+    }
+
     /* ═══════════════════════════════════════════════════════════════════
        Note Cards
        ═══════════════════════════════════════════════════════════════════ */
