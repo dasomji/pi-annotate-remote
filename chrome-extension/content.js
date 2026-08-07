@@ -442,6 +442,7 @@
         sourceNode: transaction.sourceNode,
         navigation: { path: [transaction.sourceNode], index: 0 },
         notePosition: null,
+        noteOpen: true,
       });
       return;
     }
@@ -731,11 +732,13 @@
         markersEl.appendChild(outline);
       }
       const marker = document.createElement("button");
+      const markerNumber = visible.findIndex((item) => item.element.id === element.id) + 1;
       marker.className = "pi-marker-badge";
       marker.dataset.annotationId = element.id;
       marker.style.left = `${rect.right - 14}px`;
       marker.style.top = `${rect.top - 14}px`;
-      marker.textContent = String(visible.findIndex((item) => item.element.id === element.id) + 1);
+      marker.textContent = String(markerNumber);
+      marker.setAttribute("aria-label", `Open Element annotation ${markerNumber}`);
       marker.addEventListener("click", (event) => {
         event.preventDefault();
         event.stopPropagation();
@@ -745,7 +748,9 @@
     }
     for (const card of Array.from(notesEl.children)) {
       const id = card.dataset?.annotationId;
-      if (!visible.some((item) => item.element.id === id)) card.remove();
+      if (!visible.some((item) => item.element.id === id) || records.get(id)?.noteOpen === false) {
+        card.remove();
+      }
       else {
         updateNoteCard(card, visible.find((item) => item.element.id === id).element);
         const bounds = card.getBoundingClientRect();
@@ -753,7 +758,8 @@
       }
     }
     for (const { element } of visible) {
-      if (!notesEl.querySelector?.(`[data-annotation-id="${element.id}"]`)) {
+      if (records.get(element.id)?.noteOpen !== false &&
+          !notesEl.querySelector?.(`[data-annotation-id="${element.id}"]`)) {
         createNote(element.id, { focus: false });
       }
     }
@@ -763,6 +769,8 @@
     const result = currentResult();
     const element = result.steps.flatMap((step) => step.elements).find((item) => item.id === id);
     if (!element) return;
+    const record = records.get(id);
+    if (record) record.noteOpen = true;
     let card = notesEl.querySelector?.(`[data-annotation-id="${id}"]`);
     if (card) {
       if (focus) activeRecordId = id;
@@ -784,8 +792,10 @@
       </div>
       <div class="pi-note-body">
         <textarea class="pi-note-textarea" placeholder="Describe changes for this element...">${inspect.escapeHtml(element.comment)}</textarea>
+        <div class="pi-note-actions">
+          <button class="pi-note-send" type="button" aria-label="Send comment">Send</button>
+        </div>
       </div>`;
-    const record = records.get(id);
     const source = record?.sourceNode;
     const rect = source?.getBoundingClientRect?.() || { right: 24, top: 24 };
     card.style.visibility = "hidden";
@@ -793,6 +803,7 @@
       if (operation === "idle") draft.updateComment(id, event.target.value);
     });
     card.querySelector?.(".pi-note-close")?.addEventListener("click", () => deleteRecord(id));
+    card.querySelector?.(".pi-note-send")?.addEventListener("click", () => collapseNote(id));
     card.querySelector?.(".pi-note-expand")?.addEventListener("click", () => moveElementTarget(id, "up"));
     card.querySelector?.(".pi-note-contract")?.addEventListener("click", () => moveElementTarget(id, "down"));
     card.querySelector?.(".pi-note-header")?.addEventListener("mousedown", (event) => {
@@ -931,6 +942,16 @@
     render();
   }
 
+  function collapseNote(id) {
+    if (operation !== "idle" || modal !== "none") return;
+    const record = records.get(id);
+    if (!record) return;
+    record.noteOpen = false;
+    if (activeRecordId === id) activeRecordId = null;
+    notesEl.querySelector?.(`[data-annotation-id="${id}"]`)?.remove();
+    renderEvidence();
+  }
+
   function undoDelete() {
     if (operation !== "idle" || modal !== "none") return;
     const restored = draft.undo();
@@ -1000,6 +1021,7 @@
   function onPageClick(event) {
     if (!active || mode !== "annotating" ||
         event.target.closest?.("#pi-panel") || event.target.closest?.(".pi-note-card") ||
+        event.target.closest?.("#pi-markers") ||
         event.target.closest?.(".pi-modal-backdrop") ||
         event.target.closest?.(".pi-abort-backdrop")) return;
     event.preventDefault();

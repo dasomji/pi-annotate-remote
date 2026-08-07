@@ -161,6 +161,28 @@ test("an Element annotation card can be dragged by its header without losing its
   expect(after.y + after.height).toBeLessThanOrEqual(viewport.height);
 });
 
+test("Send collapses an Element annotation to its numbered marker and the marker reopens it", async ({ workflow }) => {
+  const { page, server } = workflow;
+  const card = await annotate(page, "#state-one", "Keep this comment after collapsing");
+
+  await card.getByRole("button", { name: "Send comment" }).click();
+
+  await expect(card).toBeHidden();
+  await expect(page.getByLabel("Current Element annotation target")).toHaveCount(0);
+  const marker = page.getByRole("button", { name: "Open Element annotation 1" });
+  await expect(marker).toBeVisible();
+  await marker.click();
+
+  const reopenedComment = page.getByRole("textbox", { name: "Describe changes for this element" });
+  await expect(reopenedComment).toBeVisible();
+  await expect(reopenedComment).toHaveValue("Keep this comment after collapsing");
+  await submit(page);
+
+  await expect.poll(() => server.state.annotations.length).toBe(1);
+  expect(server.state.annotations[0].steps[0].elements[0].comment)
+    .toBe("Keep this comment after collapsing");
+});
+
 test("step filtering defaults to the current step and preserves other evidence", async ({ workflow }) => {
   const { page } = workflow;
   await annotate(page, "#state-one", "First-step annotation");

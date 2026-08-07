@@ -306,6 +306,25 @@
       color: var(--pi-fg-dim);
     }
 
+    .pi-note-actions {
+      display: flex;
+      justify-content: flex-end;
+      margin-top: 8px;
+    }
+
+    .pi-note-send {
+      padding: 6px 12px;
+      border: 0;
+      border-radius: 6px;
+      background: var(--pi-accent);
+      color: var(--pi-bg-body);
+      cursor: pointer;
+      font: 600 12px var(--pi-font-ui);
+    }
+
+    .pi-note-send:hover:not(:disabled) { background: var(--pi-accent-hover); }
+    .pi-note-send:disabled { cursor: wait; opacity: 0.65; }
+
     /* ═══════════════════════════════════════════════════════════════════
        Bottom Panel
        ═══════════════════════════════════════════════════════════════════ */
