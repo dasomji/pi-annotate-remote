@@ -75,6 +75,71 @@
       };
     }
 
+    function stageElement({ sourceNode, metadata, url, viewport }) {
+      if (!sourceNode || !metadata || typeof url !== "string" || !viewport) {
+        throw new TypeError("Staging requires a source node, metadata, URL, and viewport");
+      }
+      if (capture) return { status: "busy" };
+
+      if (!stepBoundaryArmed && activeStep) {
+        const existing = activeStep.elements.find(
+          (element) => element.sourceNode === sourceNode,
+        );
+        if (existing) {
+          const restored = existing.deleted;
+          if (restored) {
+            existing.deleted = false;
+            undoStack = undoStack.filter((id) => id !== existing.id);
+          }
+          return { status: "focused", id: existing.id, restored };
+        }
+      }
+
+      if (stepBoundaryArmed || !activeStep) {
+        activeStep = {
+          id: createId(),
+          url,
+          viewport: clone(viewport),
+          viewportImage: null,
+          elements: [],
+        };
+        steps.push(activeStep);
+        stepBoundaryArmed = false;
+      }
+      const element = {
+        id: createId(),
+        sourceNode,
+        historical: sourceNode.isConnected === false,
+        comment: "",
+        metadata: clone(metadata),
+        cropImage: null,
+        capturePending: true,
+        deleted: false,
+      };
+      activeStep.elements.push(element);
+      return { status: "staged", stepId: activeStep.id, id: element.id };
+    }
+
+    function retargetElement({ id, sourceNode, metadata }) {
+      if (capture || typeof id !== "string" || !sourceNode || !metadata) {
+        return { status: "busy" };
+      }
+      const found = locateElement(id);
+      if (!found || found.element.deleted || stepBoundaryArmed || found.step !== activeStep) {
+        return { status: "step-closed" };
+      }
+      const duplicate = found.step.elements.find(
+        (element) => !element.deleted && element.id !== id && element.sourceNode === sourceNode,
+      );
+      if (duplicate) return { status: "target-already-annotated", id: duplicate.id };
+      found.element.sourceNode = sourceNode;
+      found.element.historical = sourceNode.isConnected === false;
+      found.element.metadata = clone(metadata);
+      found.element.cropImage = null;
+      found.element.capturePending = true;
+      return { status: "retargeted", stepId: found.step.id, id };
+    }
+
     function publicStep(step) {
       return {
         id: step.id,
@@ -233,6 +298,30 @@
       });
     }
 
+    function beginElementCapture({ id, sourceNode, metadata, cropRect = metadata?.rect, url, viewport }) {
+      if (typeof id !== "string" || !sourceNode || !metadata || typeof url !== "string" || !viewport) {
+        throw new TypeError("Element capture requires an annotation ID, source node, metadata, URL, and viewport");
+      }
+      if (capture?.state === "capturing") return { status: "busy" };
+      if (capture?.state === "failed") {
+        return beginRetarget({ id, sourceNode, metadata, cropRect, url, viewport });
+      }
+      const found = locateElement(id);
+      if (!found || found.element.deleted) return { status: "step-closed" };
+      return createCaptureTransaction({
+        id,
+        retargetId: id,
+        stepId: found.step.id,
+        attempt: 1,
+        sourceNode,
+        metadata,
+        cropRect,
+        url,
+        viewport,
+        createsStep: false,
+      });
+    }
+
     function commit(transaction, { viewportImage, cropImage }, incomplete) {
       assertCurrent(transaction);
       if (!isImageResult(viewportImage) || !isImageResult(cropImage)) {
@@ -263,13 +352,19 @@
 
       if (transaction.retargetId) {
         const found = locateElement(transaction.retargetId);
-        if (!found || found.element.deleted || found.step !== activeStep || stepBoundaryArmed) {
-          throw new Error("Retarget capture targets a closed interaction step");
+        if (!found || found.element.deleted || found.step.id !== transaction.stepId) {
+          throw new Error("Element capture target is no longer available");
         }
         found.element.sourceNode = transaction.sourceNode;
         found.element.historical = transaction.sourceNode.isConnected === false;
         found.element.metadata = clone(transaction.metadata);
         found.element.cropImage = clone(cropImage);
+        found.element.capturePending = false;
+        if (!isImageResult(found.step.viewportImage)) {
+          found.step.url = transaction.url;
+          found.step.viewport = clone(transaction.viewport);
+          found.step.viewportImage = clone(viewportImage);
+        }
         capture = null;
         return {
           status: "committed",
@@ -303,6 +398,7 @@
         comment: "",
         metadata: clone(transaction.metadata),
         cropImage: clone(cropImage),
+        capturePending: false,
         deleted: false,
       };
       step.elements.push(element);
@@ -428,11 +524,18 @@
         activeElements(step).some((element) => isMissingImage(element.cropImage)));
     }
 
+    function hasPendingEvidence() {
+      return activeSteps().some((step) =>
+        !isImageResult(step.viewportImage) ||
+        activeElements(step).some((element) => element.capturePending || !isImageResult(element.cropImage)));
+    }
+
     function snapshot() {
       refreshLiveness();
       const snapshotElement = (element) => ({
         ...publicElement(element),
         sourceNode: element.sourceNode,
+        ...(element.capturePending === true ? { capturePending: true } : {}),
       });
       const snapshotSteps = activeSteps().map((step) => ({
         id: step.id,
@@ -466,6 +569,7 @@
         undoDepth: undoStack.length,
         hasRecoverableWork: hasRecoverableWork(),
         hasMissingEvidence: hasMissingEvidence(),
+        hasPendingEvidence: hasPendingEvidence(),
         stepBoundaryArmed,
         capture: capture ? {
           state: capture.state,
@@ -478,6 +582,9 @@
 
     function toAnnotationResult({ url }) {
       refreshLiveness();
+      if (hasPendingEvidence()) {
+        throw new Error("Send every Element annotation before submitting");
+      }
       const deliveredSteps = activeSteps().map(publicStep);
       if (deliveredSteps.length === 0 && !context.trim()) {
         throw new Error("A zero-step annotation requires non-empty context");
@@ -509,6 +616,9 @@
       armStepBoundary,
       beginCapture,
       beginRetarget,
+      beginElementCapture,
+      stageElement,
+      retargetElement,
       canRetarget,
       isCurrentStep,
       commitCapture,
@@ -524,6 +634,7 @@
       refreshLiveness,
       hasRecoverableWork,
       hasMissingEvidence,
+      hasPendingEvidence,
       snapshot,
       toAnnotationResult,
       purge,

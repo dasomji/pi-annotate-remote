@@ -1,20 +1,18 @@
 import { test, expect } from "./fixtures/extension.js";
-import { annotate } from "./helpers/annotation.js";
-
-async function submit(page) {
-  await page.getByRole("button", { name: /^Submit/ }).click();
-}
+import { annotate, submitAnnotation as submit } from "./helpers/annotation.js";
 
 test("delivers an atomic schema-v2 screenshot capture through the broker", async ({ workflow }) => {
-  const { page, server } = workflow;
+  const { page, server, captureControl } = workflow;
+  await captureControl.configure({ delayMs: 450 });
 
   await page.locator("#state-one").click();
-  // Dispatch during the asynchronous screenshot transaction: it must neither
-  // operate the site nor create a second provisional annotation.
-  await page.locator("#mutate").dispatchEvent("click");
   const note = page.locator(".pi-note-card").last();
   await expect(note).toBeVisible();
   await note.locator(".pi-note-textarea").fill("Keep this state");
+  await note.getByRole("button", { name: "Send comment" }).click();
+  // Dispatch during the asynchronous screenshot transaction: it must neither
+  // operate the site nor create a second provisional annotation.
+  await page.locator("#mutate").dispatchEvent("click");
   await expect(page.locator("#mutation-log")).toBeEmpty();
   await submit(page);
 

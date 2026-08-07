@@ -57,6 +57,7 @@
   let styleEl;
   let panelEl;
   let highlightEl;
+  let connectorsEl;
   let markersEl;
   let notesEl;
 
@@ -83,6 +84,11 @@
     highlightEl.id = "pi-highlight";
     highlightEl.style.display = "none";
     document.body.appendChild(highlightEl);
+
+    connectorsEl = document.createElementNS("http://www.w3.org/2000/svg", "svg");
+    connectorsEl.classList.add("pi-connectors");
+    connectorsEl.setAttribute("aria-hidden", "true");
+    document.body.appendChild(connectorsEl);
 
     markersEl = document.createElement("div");
     markersEl.id = "pi-markers";
@@ -242,8 +248,8 @@
     livenessFrame = null;
     document.body.style.cursor = "";
     closeModal();
-    for (const element of [styleEl, panelEl, highlightEl, markersEl, notesEl]) element?.remove();
-    styleEl = panelEl = highlightEl = markersEl = notesEl = null;
+    for (const element of [styleEl, panelEl, highlightEl, connectorsEl, markersEl, notesEl]) element?.remove();
+    styleEl = panelEl = highlightEl = connectorsEl = markersEl = notesEl = null;
     records.clear();
     activeRecordId = null;
     noteDrag = null;
@@ -271,7 +277,35 @@
     return data;
   }
 
-  async function captureElement(sourceNode, { retargetId = null, navigationTarget = null } = {}) {
+  function selectElement(sourceNode) {
+    if (mode !== "annotating" || operation !== "idle" || modal !== "none") return;
+    const result = draft.stageElement({
+      sourceNode,
+      metadata: freezeMetadata(sourceNode),
+      url: window.location.href,
+      viewport: { width: window.innerWidth, height: window.innerHeight },
+    });
+    if (result.status === "focused") {
+      render();
+      focusRecord(result.id);
+      return;
+    }
+    if (result.status !== "staged") return;
+    records.set(result.id, {
+      id: result.id,
+      stepId: result.stepId,
+      sourceNode,
+      navigation: { path: [sourceNode], index: 0 },
+      notePosition: null,
+      noteOpen: true,
+    });
+    stepFilter = result.stepId;
+    deliveryConfirmedDegraded = false;
+    render();
+    createNote(result.id);
+  }
+
+  async function captureElement(sourceNode, { retargetId = null } = {}) {
     if (mode !== "annotating" || operation !== "idle" || modal !== "none") return;
     const metadata = freezeMetadata(sourceNode);
     const clientRect = sourceNode.getBoundingClientRect();
@@ -285,7 +319,7 @@
       captureLifecyclePromise = new Promise((resolve) => { resolveCaptureLifecycle = resolve; });
     }
     const viewport = { width: window.innerWidth, height: window.innerHeight };
-    const transaction = (retargetId ? draft.beginRetarget : draft.beginCapture)({
+    const transaction = (retargetId ? draft.beginElementCapture : draft.beginCapture)({
       ...(retargetId ? { id: retargetId } : {}),
       sourceNode,
       metadata,
@@ -317,14 +351,13 @@
         transaction: transaction.transaction,
         sourceNode,
         metadata,
-        navigationTarget,
       };
       showCaptureFailure(transaction.status === "source-disconnected");
       return;
     }
 
     operation = "capturing";
-    failedCapture = { transaction, sourceNode, metadata, navigationTarget };
+    failedCapture = { transaction, sourceNode, metadata };
     render();
     capturePromise = performCapture(transaction);
     await capturePromise;
@@ -366,18 +399,17 @@
     const result = draft.commitCapture(transaction, { viewportImage, cropImage });
     operation = "idle";
     if (result.status === "committed") {
-      finalizeCommittedCapture(result, transaction, failedCapture?.navigationTarget);
+      finalizeCommittedCapture(result, transaction);
       return;
     }
     failedCapture = {
       transaction,
       sourceNode: transaction.sourceNode,
       images: { viewportImage, cropImage },
-      navigationTarget: failedCapture?.navigationTarget || null,
     };
     if (transaction.attempt >= 3) {
       const committed = draft.commitIncomplete(transaction, { viewportImage, cropImage });
-      finalizeCommittedCapture(committed, transaction, failedCapture?.navigationTarget);
+      finalizeCommittedCapture(committed, transaction);
       return;
     }
     showCaptureFailure(false);
@@ -393,7 +425,6 @@
     }
     await captureElement(pending.sourceNode, {
       retargetId: pending.transaction.retargetId || null,
-      navigationTarget: pending.navigationTarget || null,
     });
   }
 
@@ -409,31 +440,29 @@
         disconnected ? "source_disconnected" : "crop_failure", attempt),
     };
     const result = draft.commitIncomplete(transaction, images);
-    commitRecord(result, transaction, failedCapture.navigationTarget);
+    commitRecord(result, transaction);
     selectCreatedStep(transaction, result);
     failedCapture = null;
     settleCaptureLifecycle();
     deliveryConfirmedDegraded = false;
     closeModal();
     render();
-    createNote(result.id);
   }
 
   function selectCreatedStep(transaction, result) {
     if (transaction.createsStep) stepFilter = result.stepId;
   }
 
-  function finalizeCommittedCapture(result, transaction, navigationTarget) {
-    commitRecord(result, transaction, navigationTarget);
+  function finalizeCommittedCapture(result, transaction) {
+    commitRecord(result, transaction);
     selectCreatedStep(transaction, result);
     failedCapture = null;
     settleCaptureLifecycle();
     deliveryConfirmedDegraded = false;
     render();
-    createNote(result.id);
   }
 
-  function commitRecord(result, transaction, navigationTarget) {
+  function commitRecord(result, transaction) {
     const existing = records.get(result.id);
     if (!existing) {
       records.set(result.id, {
@@ -448,21 +477,16 @@
     }
     existing.sourceNode = transaction.sourceNode;
     existing.stepId = result.stepId;
-    if (navigationTarget) {
-      existing.navigation.path[navigationTarget.index] = navigationTarget.node;
-      if (navigationTarget.truncate) {
-        existing.navigation.path.length = navigationTarget.index + 1;
-      }
-      existing.navigation.index = navigationTarget.index;
-    }
   }
 
   function discardFailedCapture() {
+    const id = failedCapture?.transaction?.id;
     if (failedCapture) draft.discardCapture(failedCapture.transaction);
     failedCapture = null;
     settleCaptureLifecycle();
     closeModal();
     render();
+    if (id && records.has(id)) createNote(id);
   }
 
   function showCaptureFailure(disconnected) {
@@ -535,6 +559,11 @@
       return;
     }
     draft.setContext(byId("pi-context")?.value || "");
+    if (draft.hasPendingEvidence()) {
+      setDeliveryError("Send every open Element annotation before submitting.");
+      render();
+      return;
+    }
     if (draft.hasMissingEvidence() && !deliveryConfirmedDegraded) {
       const affected = missingEvidenceLabels(draft.snapshot());
       showModal("degradedDelivery", {
@@ -629,6 +658,9 @@
     if (submitButton) {
       submitButton.disabled = draftMutationBlocked;
       submitButton.textContent = operation === "delivering" ? "Sending…" : (deliveryError ? "Retry" : "Submit");
+      submitButton.title = snapshot.hasPendingEvidence
+        ? "Send every open Element annotation before submitting"
+        : "";
     }
     const undo = byId("pi-undo");
     if (undo) {
@@ -651,6 +683,7 @@
       error.hidden = !deliveryError;
     }
     const evidenceVisible = mode === "annotating";
+    if (connectorsEl) connectorsEl.style.display = evidenceVisible ? "" : "none";
     if (markersEl) markersEl.style.display = evidenceVisible ? "" : "none";
     if (notesEl) notesEl.style.display = evidenceVisible ? "" : "none";
     if (!evidenceVisible) hideHighlight();
@@ -695,9 +728,11 @@
       button.dataset.step = step.id;
       button.setAttribute("aria-pressed", String(stepFilter === step.id));
       button.setAttribute("aria-label", `Step ${index + 1}, ${step.elements.length} element annotations`);
-      const thumbnail = step.viewportImage.status === "captured"
+      const thumbnail = step.viewportImage?.status === "captured"
         ? `<img class="pi-step-thumbnail" src="${step.viewportImage.dataUrl}" alt="">`
-        : `<span class="pi-step-thumbnail pi-step-missing" aria-label="Viewport screenshot missing">!</span>`;
+        : step.viewportImage?.status === "missing"
+          ? `<span class="pi-step-thumbnail pi-step-missing" aria-label="Viewport screenshot missing">!</span>`
+          : `<span class="pi-step-thumbnail pi-step-pending" aria-label="Viewport screenshot pending">…</span>`;
       button.innerHTML = `${thumbnail}<span>Step ${index + 1}</span><span>${step.elements.length}</span>` +
         (stepFilter !== "all" && stepFilter !== step.id
           ? `<span class="pi-step-hidden" aria-label="Hidden by step filter">◉̸</span>` : "");
@@ -763,6 +798,29 @@
         createNote(element.id, { focus: false });
       }
     }
+    renderConnectors();
+  }
+
+  function renderConnectors() {
+    if (!connectorsEl || !markersEl || !notesEl) return;
+    connectorsEl.innerHTML = "";
+    for (const card of notesEl.querySelectorAll?.(".pi-note-card") || []) {
+      const id = card.dataset.annotationId;
+      const marker = markersEl.querySelector?.(`.pi-marker-badge[data-annotation-id="${id}"]`);
+      if (!marker || card.style.visibility === "hidden") continue;
+      const markerBounds = marker.getBoundingClientRect();
+      const cardBounds = card.getBoundingClientRect();
+      const startX = markerBounds.left + markerBounds.width / 2;
+      const startY = markerBounds.top + markerBounds.height / 2;
+      const endX = Math.max(cardBounds.left, Math.min(startX, cardBounds.right));
+      const endY = Math.max(cardBounds.top, Math.min(startY, cardBounds.bottom));
+      const bendX = startX + (endX - startX) / 2;
+      const path = document.createElementNS("http://www.w3.org/2000/svg", "path");
+      path.classList.add("pi-connector");
+      path.dataset.annotationId = id;
+      path.setAttribute("d", `M ${startX} ${startY} C ${bendX} ${startY}, ${bendX} ${endY}, ${endX} ${endY}`);
+      connectorsEl.appendChild(path);
+    }
   }
 
   function createNote(id, { focus = true } = {}) {
@@ -803,7 +861,7 @@
       if (operation === "idle") draft.updateComment(id, event.target.value);
     });
     card.querySelector?.(".pi-note-close")?.addEventListener("click", () => deleteRecord(id));
-    card.querySelector?.(".pi-note-send")?.addEventListener("click", () => collapseNote(id));
+    card.querySelector?.(".pi-note-send")?.addEventListener("click", () => { void sendNote(id); });
     card.querySelector?.(".pi-note-expand")?.addEventListener("click", () => moveElementTarget(id, "up"));
     card.querySelector?.(".pi-note-contract")?.addEventListener("click", () => moveElementTarget(id, "down"));
     card.querySelector?.(".pi-note-header")?.addEventListener("mousedown", (event) => {
@@ -905,7 +963,7 @@
       "Move Element annotation toward original element";
   }
 
-  async function moveElementTarget(id, direction) {
+  function moveElementTarget(id, direction) {
     if (operation !== "idle" || modal !== "none" || !draft.canRetarget(id)) return;
     const record = records.get(id);
     if (!record?.navigation || record.sourceNode?.isConnected === false) return;
@@ -926,10 +984,18 @@
       if (targetIndex < 0 || !target || target.isConnected === false) return;
     }
 
-    await captureElement(target, {
-      retargetId: id,
-      navigationTarget: { node: target, index: targetIndex, truncate },
+    const result = draft.retargetElement({
+      id,
+      sourceNode: target,
+      metadata: freezeMetadata(target),
     });
+    if (result.status !== "retargeted") return;
+    record.sourceNode = target;
+    record.navigation.path[targetIndex] = target;
+    if (truncate) record.navigation.path.length = targetIndex + 1;
+    record.navigation.index = targetIndex;
+    deliveryConfirmedDegraded = false;
+    renderEvidence();
   }
 
   function deleteRecord(id) {
@@ -942,14 +1008,15 @@
     render();
   }
 
-  function collapseNote(id) {
+  async function sendNote(id) {
     if (operation !== "idle" || modal !== "none") return;
     const record = records.get(id);
-    if (!record) return;
+    if (!record?.sourceNode || record.sourceNode.isConnected === false) return;
     record.noteOpen = false;
     if (activeRecordId === id) activeRecordId = null;
     notesEl.querySelector?.(`[data-annotation-id="${id}"]`)?.remove();
     renderEvidence();
+    await captureElement(record.sourceNode, { retargetId: id });
   }
 
   function undoDelete() {
@@ -1031,7 +1098,7 @@
     // clicks are ignored rather than leaking through to the site.
     if (operation !== "idle" || modal !== "none") return;
     const source = hovered || event.target;
-    if (source && !inspect.isPiElement(source)) void captureElement(source);
+    if (source && !inspect.isPiElement(source)) selectElement(source);
   }
 
   function hideHighlight() {
@@ -1041,7 +1108,7 @@
   function hideChrome() {
     hideHighlight();
     etch.clearMarkers();
-    const elements = [panelEl, markersEl, notesEl].filter(Boolean);
+    const elements = [panelEl, connectorsEl, markersEl, notesEl].filter(Boolean);
     const display = elements.map((element) => [element, element.style.display]);
     elements.forEach((element) => { element.style.display = "none"; });
     return () => {
@@ -1087,6 +1154,7 @@
       });
       const record = records.get(noteDrag.id);
       if (record) record.notePosition = position;
+      renderConnectors();
       return;
     }
     if (!bubbleDrag || !panelEl) return;

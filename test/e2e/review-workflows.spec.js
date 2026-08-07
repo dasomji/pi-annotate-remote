@@ -1,5 +1,5 @@
 import { test, expect } from "./fixtures/extension.js";
-import { annotate } from "./helpers/annotation.js";
+import { annotate, submitAnnotation as submit } from "./helpers/annotation.js";
 
 async function createSecondStep(page) {
   await page.getByRole("button", { name: "Interact with page" }).click();
@@ -9,10 +9,6 @@ async function createSecondStep(page) {
   await resume.click();
   await expect(page.getByRole("button", { name: "Interact with page" })).toBeVisible();
   return annotate(page, "#state-two", "Second-step annotation");
-}
-
-async function submit(page) {
-  await page.getByRole("button", { name: /^Submit/ }).click();
 }
 
 async function expectCurrentTargetOutline(page, targetSelector) {
@@ -80,6 +76,52 @@ test("Element annotation arrows retrace the exact DOM branch and deliver the ret
   expect(element.comment).toBe("Keep this comment while retargeting");
   expect(element.metadata).toMatchObject({ selector: "main", tag: "main" });
   expect(element.cropImage.status).toBe("captured");
+});
+
+test("DOM navigation stays visually stable and defers screenshot capture until Send", async ({ workflow }) => {
+  const { page, captureControl } = workflow;
+  await captureControl.configure({ delayMs: 800 });
+
+  await page.locator("#state-one").click();
+  const note = page.locator(".pi-note-card").last();
+  await expect(note).toBeVisible({ timeout: 350 });
+  await note.locator(".pi-note-textarea").fill("Capture the final DOM target");
+  expect(await captureControl.count()).toBe(0);
+
+  await page.evaluate(() => {
+    const targets = [
+      document.querySelector("#pi-panel"),
+      document.querySelector("#pi-markers"),
+      document.querySelector(".pi-notes-container"),
+    ].filter(Boolean);
+    window.__piChromeHidden = [];
+    window.__piChromeObserver = new MutationObserver((records) => {
+      for (const record of records) {
+        if (record.target.style.display === "none") {
+          window.__piChromeHidden.push(record.target.id || record.target.className);
+        }
+      }
+    });
+    targets.forEach((target) => window.__piChromeObserver.observe(target, {
+      attributes: true,
+      attributeFilter: ["style"],
+    }));
+  });
+
+  await note.getByRole("button", { name: "Move Element annotation to parent" }).click();
+  await expect(note.locator(".pi-note-selector")).toHaveText("main");
+  await expect(note.getByRole("button", {
+    name: "Move Element annotation toward original element",
+  })).toBeEnabled();
+  expect(await captureControl.count()).toBe(0);
+  expect(await page.evaluate(() => {
+    window.__piChromeObserver.disconnect();
+    return window.__piChromeHidden;
+  })).toEqual([]);
+
+  await note.getByRole("button", { name: "Send comment" }).click();
+  await expect(note).toBeHidden({ timeout: 350 });
+  await expect.poll(() => captureControl.count()).toBe(1);
 });
 
 test("DOM navigation remains visible but disabled after its interaction step closes", async ({ workflow }) => {
@@ -161,6 +203,24 @@ test("an Element annotation card can be dragged by its header without losing its
   expect(after.y + after.height).toBeLessThanOrEqual(viewport.height);
 });
 
+test("an open Element annotation card has a connector to its numbered marker that follows dragging", async ({ workflow }) => {
+  const { page } = workflow;
+  const card = await annotate(page, "#state-one", "Keep marker and card associated");
+  const annotationId = await card.getAttribute("data-annotation-id");
+  const connector = page.locator(`.pi-connector[data-annotation-id="${annotationId}"]`);
+
+  await expect(connector).toHaveAttribute("d", /^M\s*\d/);
+  const before = await connector.getAttribute("d");
+  const header = card.locator(".pi-note-header");
+  const handle = await header.boundingBox();
+  await page.mouse.move(handle.x + handle.width / 2, handle.y + handle.height / 2);
+  await page.mouse.down();
+  await page.mouse.move(handle.x + handle.width / 2 + 60, handle.y + handle.height / 2 + 40);
+  await page.mouse.up();
+
+  await expect.poll(() => connector.getAttribute("d")).not.toBe(before);
+});
+
 test("Send collapses an Element annotation to its numbered marker and the marker reopens it", async ({ workflow }) => {
   const { page, server } = workflow;
   const card = await annotate(page, "#state-one", "Keep this comment after collapsing");
@@ -191,7 +251,7 @@ test("step filtering defaults to the current step and preserves other evidence",
   await expect(stepButtons).toHaveCount(1);
   await expect(stepButtons.first()).toHaveAttribute("aria-pressed", "true");
   await expect(stepButtons.first()).toHaveAttribute("aria-label", "Step 1, 1 element annotations");
-  expect(await stepButtons.first().locator("img").evaluate((image) => image.naturalWidth)).toBeGreaterThan(0);
+  await expect(stepButtons.first().getByLabel("Viewport screenshot pending")).toBeVisible();
   await createSecondStep(page);
 
   await expect(stepButtons).toHaveCount(2);
@@ -267,13 +327,13 @@ test("a historical annotation remains visible after filtering away and back", as
   await expect(note.locator(".pi-note-textarea")).toHaveValue("Historical after filtering");
 });
 
-test("deleting a last element removes its step and Undo restores assets and original position", async ({ workflow }) => {
+test("deleting a last element removes its step and Undo restores pending evidence and original position", async ({ workflow }) => {
   const { page, server } = workflow;
   await annotate(page, "#state-one", "First-step annotation");
   const secondNote = await createSecondStep(page);
 
   const stepButtons = page.locator("#pi-filmstrip .pi-step-filter[data-step]:not([data-step='all'])");
-  const secondThumbnail = await stepButtons.nth(1).locator("img.pi-step-thumbnail").getAttribute("src");
+  await expect(stepButtons.nth(1).getByLabel("Viewport screenshot pending")).toBeVisible();
   await secondNote.getByRole("button", { name: "Delete element annotation" }).click();
   await expect(stepButtons).toHaveCount(1);
   await expect(page.getByRole("button", { name: "Undo delete" })).toBeEnabled();
@@ -281,7 +341,7 @@ test("deleting a last element removes its step and Undo restores assets and orig
   await page.getByRole("button", { name: "Undo delete" }).click();
   await expect(page.getByRole("button", { name: "Undo delete" })).toBeHidden();
   await expect(stepButtons).toHaveCount(2);
-  await expect(stepButtons.nth(1).locator("img.pi-step-thumbnail")).toHaveAttribute("src", secondThumbnail);
+  await expect(stepButtons.nth(1).getByLabel("Viewport screenshot pending")).toBeVisible();
   await expect(page.locator(".pi-note-card").last().locator(".pi-note-textarea"))
     .toHaveValue("Second-step annotation");
   await submit(page);
@@ -301,6 +361,10 @@ test("three screenshot failures name incomplete evidence before explicit degrade
   await captureControl.configure({ failures: 3 });
 
   await page.locator("#state-one").click();
+  const note = page.locator(".pi-note-card").last();
+  await expect(note).toBeVisible();
+  await note.locator(".pi-note-textarea").fill("Keep incomplete evidence");
+  await note.getByRole("button", { name: "Send comment" }).click();
   let dialog = page.getByRole("dialog", { name: "Screenshot capture failed" });
   await expect(dialog).toContainText("Attempt 1 of 3");
   await dialog.getByRole("button", { name: "Retry" }).click();
@@ -312,9 +376,6 @@ test("three screenshot failures name incomplete evidence before explicit degrade
   });
   await dialog.getByRole("button", { name: "Retry" }).click();
 
-  const note = page.locator(".pi-note-card").last();
-  await expect(note).toBeVisible();
-  await note.locator(".pi-note-textarea").fill("Keep incomplete evidence");
   await submit(page);
 
   const degraded = page.getByRole("dialog", { name: "Some screenshots are missing" });
@@ -344,6 +405,7 @@ test("Escape cannot dismiss or strand a failed capture transaction", async ({ wo
   await captureControl.configure({ failures: 1 });
 
   await page.locator("#state-one").click();
+  await page.getByRole("button", { name: "Send comment" }).click();
   const failure = page.getByRole("dialog", { name: "Screenshot capture failed" });
   await expect(failure).toBeVisible();
   await expect(page.locator("#pi-panel")).toHaveAttribute("aria-busy", "true");
@@ -384,6 +446,7 @@ test("a route attempted during capture waits for the atomic transaction before a
   await captureControl.configure({ delayMs: 450 });
 
   await page.locator("#state-one").click();
+  await page.getByRole("button", { name: "Send comment" }).click();
   const captureStatus = page.locator("#pi-capture-status");
   await expect(captureStatus).toBeVisible();
   await expect(captureStatus).toHaveText("Capturing element evidence…");
@@ -394,9 +457,11 @@ test("a route attempted during capture waits for the atomic transaction before a
 
   const routeDialog = page.getByRole("dialog", { name: /leave|discard/i });
   await expect(routeDialog).toBeVisible();
-  await expect(page.locator(".pi-note-card")).toHaveCount(1);
+  await expect(page.locator(".pi-note-card")).toHaveCount(0);
+  await expect(page.getByRole("button", { name: "Open Element annotation 1" })).toBeVisible();
   await routeDialog.getByRole("button", { name: "Stay on this page" }).click();
-  await expect(page.locator(".pi-note-card")).toHaveCount(1);
+  await expect(page.locator(".pi-note-card")).toHaveCount(0);
+  await expect(page.getByRole("button", { name: "Open Element annotation 1" })).toBeVisible();
 });
 
 test("a route attempted during delivery replays automatically after acknowledgement", async ({ workflow }) => {
