@@ -121,6 +121,7 @@
 
     .pi-marker-outline {
       position: fixed;
+      box-sizing: border-box;
       pointer-events: none;
       border: 2px solid var(--pi-accent);
       border-radius: var(--pi-radius);

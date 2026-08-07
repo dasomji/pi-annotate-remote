@@ -15,6 +15,21 @@ async function submit(page) {
   await page.getByRole("button", { name: /^Submit/ }).click();
 }
 
+async function expectCurrentTargetOutline(page, targetSelector) {
+  const outline = page.getByLabel("Current Element annotation target");
+  await expect(outline).toBeVisible();
+  await expect.poll(async () => {
+    const [outlineBox, targetBox] = await Promise.all([
+      outline.boundingBox(),
+      page.locator(targetSelector).boundingBox(),
+    ]);
+    if (!outlineBox || !targetBox) return false;
+    return ["x", "y", "width", "height"].every(
+      (key) => Math.abs(outlineBox[key] - targetBox[key]) < 1,
+    );
+  }).toBe(true);
+}
+
 test("consecutive selections retain accepted-click order within one step", async ({ workflow }) => {
   const { page, server } = workflow;
   await annotate(page, "#state-one", "First same-state annotation");
@@ -49,9 +64,11 @@ test("Element annotation arrows retrace the exact DOM branch and deliver the ret
   await moveUp.click();
   await expect(note.locator(".pi-note-selector")).toHaveText("main");
   await expect(moveDown).toBeEnabled();
+  await expectCurrentTargetOutline(page, "main");
 
   await moveDown.click();
   await expect(note.locator(".pi-note-selector")).toHaveText("#state-one");
+  await expectCurrentTargetOutline(page, "#state-one");
 
   await moveUp.click();
   await expect(note.locator(".pi-note-selector")).toHaveText("main");

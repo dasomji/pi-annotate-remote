@@ -30,6 +30,7 @@
   let etchEnabled = false;
   let debugMode = false;
   let stepFilter = "all";
+  let activeRecordId = null;
   let hovered = null;
   let hoverStack = [];
   let hoverIndex = 0;
@@ -205,6 +206,7 @@
     etchEnabled = false;
     debugMode = false;
     stepFilter = "all";
+    activeRecordId = null;
     failedCapture = null;
     deliveryError = "";
     deliveryConfirmedDegraded = false;
@@ -241,6 +243,7 @@
     for (const element of [styleEl, panelEl, highlightEl, markersEl, notesEl]) element?.remove();
     styleEl = panelEl = highlightEl = markersEl = notesEl = null;
     records.clear();
+    activeRecordId = null;
     sessionId = null;
   }
 
@@ -712,6 +715,17 @@
       const source = record?.sourceNode;
       if (!source || source.isConnected === false) continue;
       const rect = source.getBoundingClientRect();
+      if (element.id === activeRecordId) {
+        const outline = document.createElement("div");
+        outline.className = "pi-marker-outline pi-current-target-outline";
+        outline.dataset.annotationId = element.id;
+        outline.setAttribute("aria-label", "Current Element annotation target");
+        Object.assign(outline.style, {
+          left: `${rect.left}px`, top: `${rect.top}px`,
+          width: `${rect.width}px`, height: `${rect.height}px`,
+        });
+        markersEl.appendChild(outline);
+      }
       const marker = document.createElement("button");
       marker.className = "pi-marker-badge";
       marker.dataset.annotationId = element.id;
@@ -747,7 +761,9 @@
     if (!element) return;
     let card = notesEl.querySelector?.(`[data-annotation-id="${id}"]`);
     if (card) {
+      if (focus) activeRecordId = id;
       updateNoteCard(card, element);
+      if (focus) renderEvidence();
       if (focus) card.querySelector?.(".pi-note-textarea")?.focus();
       return;
     }
@@ -774,10 +790,19 @@
     card.querySelector?.(".pi-note-close")?.addEventListener("click", () => deleteRecord(id));
     card.querySelector?.(".pi-note-expand")?.addEventListener("click", () => moveElementTarget(id, "up"));
     card.querySelector?.(".pi-note-contract")?.addEventListener("click", () => moveElementTarget(id, "down"));
+    card.addEventListener("focusin", () => {
+      if (activeRecordId === id) return;
+      activeRecordId = id;
+      renderEvidence();
+    });
     notesEl.appendChild(card);
     placeNoteCard(card, { left: rect.right + 16, top: rect.top });
     card.style.visibility = "";
     updateNoteCard(card, element);
+    if (focus) {
+      activeRecordId = id;
+      renderEvidence();
+    }
     if (focus) card.querySelector?.(".pi-note-textarea")?.focus();
   }
 
@@ -877,6 +902,7 @@
 
   function deleteRecord(id) {
     if (operation !== "idle" || modal !== "none" || !draft.softDelete(id)) return;
+    if (activeRecordId === id) activeRecordId = null;
     notesEl.querySelector?.(`[data-annotation-id="${id}"]`)?.remove();
     byId("pi-undo") && (byId("pi-undo").disabled = false);
     if (!currentResult().steps.some((step) => step.id === stepFilter)) stepFilter = "all";
