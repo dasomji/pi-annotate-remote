@@ -30,6 +30,7 @@
   let etchEnabled = false;
   let debugMode = false;
   let stepFilter = "all";
+  let activeRecordId = null;
   let hovered = null;
   let hoverStack = [];
   let hoverIndex = 0;
@@ -43,18 +44,21 @@
   let lastFocusedControl = null;
   let routeDialog = null;
   let bubbleDrag = null;
+  let noteDrag = null;
   let bubbleDragged = false;
   let bubblePosition = null;
   let escapeCount = 0;
   let escapeTimer = null;
   let livenessObserver = null;
   let livenessFrame = null;
+  let captureReturnTimer = null;
 
   let draft = createDraft({ createId: makeId });
   const records = new Map();
   let styleEl;
   let panelEl;
   let highlightEl;
+  let connectorsEl;
   let markersEl;
   let notesEl;
 
@@ -81,6 +85,11 @@
     highlightEl.id = "pi-highlight";
     highlightEl.style.display = "none";
     document.body.appendChild(highlightEl);
+
+    connectorsEl = document.createElementNS("http://www.w3.org/2000/svg", "svg");
+    connectorsEl.classList.add("pi-connectors");
+    connectorsEl.setAttribute("aria-hidden", "true");
+    document.body.appendChild(connectorsEl);
 
     markersEl = document.createElement("div");
     markersEl.id = "pi-markers";
@@ -111,48 +120,51 @@
   }
 
   function createPanel() {
+    const grinsekatzeIcon = chrome.runtime.getURL?.("assets/grinsekatze.svg") ||
+      "assets/grinsekatze.svg";
     panelEl = document.createElement("div");
     panelEl.id = "pi-panel";
     panelEl.innerHTML = `
       <button class="pi-resume-bubble" id="pi-resume-bubble" type="button"
         aria-label="Resume annotation" title="Resume annotation">
-        <span class="pi-bubble-logo">π</span><span>Resume</span>
+        <img class="pi-bubble-logo" src="${grinsekatzeIcon}" alt=""><span>Resume</span>
       </button>
       <button class="pi-minimized-bubble" id="pi-minimized-bubble" type="button"
         aria-label="Restore annotation bar" title="Restore annotation bar">
-        <span class="pi-bubble-logo">π</span><span class="pi-bubble-count" id="pi-bubble-count">0</span>
+        <img class="pi-bubble-logo" src="${grinsekatzeIcon}" alt=""><span class="pi-bubble-count" id="pi-bubble-count">0</span>
       </button>
-      <div class="pi-header">
-        <span class="pi-logo">π Annotate</span>
-        <span class="pi-hint">Click elements • Esc ×3 to abort</span>
-        <button class="pi-minimize" id="pi-minimize" aria-label="Minimize annotation bar">−</button>
-        <button class="pi-close" id="pi-close" aria-label="Cancel annotation">×</button>
-      </div>
-      <div class="pi-toolbar">
-        <button class="pi-btn pi-btn-pause" id="pi-pause">Pause &amp; interact</button>
+      <nav class="pi-step-strip" aria-label="Interaction steps">
+        <img class="pi-grinsekatze-icon" src="${grinsekatzeIcon}" alt="Grinsekatze">
         <div class="pi-filmstrip" id="pi-filmstrip" aria-label="Interaction steps">
-          <button class="pi-step-filter active" id="pi-filter-all" data-step="all">All steps</button>
+          <button class="pi-step-filter active" id="pi-filter-all" data-step="all"
+            aria-pressed="true">All steps</button>
         </div>
-        <span class="pi-spacer"></span>
-        <button class="pi-btn pi-btn-cancel" id="pi-undo" disabled>Undo delete</button>
+        <button class="pi-btn pi-btn-pause" id="pi-pause">Interact with page</button>
+        <button class="pi-btn pi-btn-secondary" id="pi-undo" hidden>Undo delete</button>
+        <details class="pi-advanced" id="pi-advanced">
+          <summary role="button" aria-label="More options" title="More options">•••</summary>
+          <div class="pi-advanced-menu">
+            <label class="pi-notes-toggle" title="Include computed CSS, parent layout, and CSS variables">
+              <input type="checkbox" id="pi-debug-mode"><span>Debug capture</span>
+            </label>
+          </div>
+        </details>
+        <button class="pi-icon-button pi-help" id="pi-help" aria-label="How to annotate" title="How to annotate">?</button>
+        <button class="pi-icon-button pi-minimize" id="pi-minimize" aria-label="Minimize annotation bar" title="Minimize">−</button>
+        <button class="pi-icon-button pi-close" id="pi-close" aria-label="Cancel annotation" title="Close">×</button>
+      </nav>
+      <div class="pi-composer" role="group" aria-label="Annotation composer">
+        <textarea id="pi-context" rows="2" aria-label="General context"
+          placeholder="General context (optional)..."></textarea>
         <label class="pi-notes-toggle pi-etch-toggle">
-          <input type="checkbox" id="pi-etch-mode"><span>Etch</span>
+          <input type="checkbox" id="pi-etch-mode" aria-label="Etch"><span aria-hidden="true">Etch</span>
           <span class="pi-etch-badge" id="pi-etch-count" style="display:none"></span>
         </label>
-        <label class="pi-notes-toggle" title="Include computed CSS, parent layout, and CSS variables">
-          <input type="checkbox" id="pi-debug-mode"><span>Debug</span>
-        </label>
-      </div>
-      <div class="pi-context-row">
-        <textarea id="pi-context" rows="2" placeholder="General context (optional)..."></textarea>
-      </div>
-      <div class="pi-actions">
-        <span class="pi-capture-status" id="pi-capture-status" role="status" aria-live="polite"></span>
-        <div class="pi-delivery-error" id="pi-delivery-error" role="alert" aria-live="assertive" hidden></div>
-        <div class="pi-buttons">
-          <button class="pi-btn pi-btn-cancel" id="pi-cancel">Cancel</button>
-          <button class="pi-btn pi-btn-submit" id="pi-submit">Submit</button>
+        <div class="pi-composer-status">
+          <span class="pi-capture-status" id="pi-capture-status" role="status" aria-live="polite"></span>
+          <div class="pi-delivery-error" id="pi-delivery-error" role="alert" aria-live="assertive" hidden></div>
         </div>
+        <button class="pi-btn pi-btn-submit" id="pi-submit">Submit</button>
       </div>`;
     document.body.appendChild(panelEl);
 
@@ -163,7 +175,7 @@
     byId("pi-minimized-bubble")?.addEventListener("click", restorePanel);
     byId("pi-minimize")?.addEventListener("click", () => setMinimized(true));
     byId("pi-close")?.addEventListener("click", showAbortDialog);
-    byId("pi-cancel")?.addEventListener("click", showAbortDialog);
+    byId("pi-help")?.addEventListener("click", showHelpDialog);
     byId("pi-submit")?.addEventListener("click", submit);
     byId("pi-undo")?.addEventListener("click", undoDelete);
     byId("pi-filter-all")?.addEventListener("click", () => setFilter("all"));
@@ -181,13 +193,17 @@
       else etch.stop();
     });
     byId("pi-debug-mode")?.addEventListener("change", (event) => {
-      if (operation === "idle") debugMode = event.target.checked;
+      if (operation === "idle") {
+        debugMode = event.target.checked;
+        render();
+      }
       else event.target.checked = debugMode;
     });
   }
 
   function resetDraft() {
     settleCaptureLifecycle();
+    cleanupCaptureReturnAnimation();
     etch.reset();
     draft.purge();
     draft = createDraft({ createId: makeId });
@@ -199,6 +215,8 @@
     etchEnabled = false;
     debugMode = false;
     stepFilter = "all";
+    activeRecordId = null;
+    noteDrag = null;
     failedCapture = null;
     deliveryError = "";
     deliveryConfirmedDegraded = false;
@@ -213,6 +231,7 @@
     if (!active) return;
     active = false;
     settleCaptureLifecycle();
+    cleanupCaptureReturnAnimation();
     routeGuard.stop();
     if (purge) draft.purge();
     etch.reset();
@@ -232,9 +251,11 @@
     livenessFrame = null;
     document.body.style.cursor = "";
     closeModal();
-    for (const element of [styleEl, panelEl, highlightEl, markersEl, notesEl]) element?.remove();
-    styleEl = panelEl = highlightEl = markersEl = notesEl = null;
+    for (const element of [styleEl, panelEl, highlightEl, connectorsEl, markersEl, notesEl]) element?.remove();
+    styleEl = panelEl = highlightEl = connectorsEl = markersEl = notesEl = null;
     records.clear();
+    activeRecordId = null;
+    noteDrag = null;
     sessionId = null;
   }
 
@@ -259,7 +280,35 @@
     return data;
   }
 
-  async function captureElement(sourceNode) {
+  function selectElement(sourceNode) {
+    if (mode !== "annotating" || operation !== "idle" || modal !== "none") return;
+    const result = draft.stageElement({
+      sourceNode,
+      metadata: freezeMetadata(sourceNode),
+      url: window.location.href,
+      viewport: { width: window.innerWidth, height: window.innerHeight },
+    });
+    if (result.status === "focused") {
+      render();
+      focusRecord(result.id);
+      return;
+    }
+    if (result.status !== "staged") return;
+    records.set(result.id, {
+      id: result.id,
+      stepId: result.stepId,
+      sourceNode,
+      navigation: { path: [sourceNode], index: 0 },
+      notePosition: null,
+      noteOpen: true,
+    });
+    stepFilter = result.stepId;
+    deliveryConfirmedDegraded = false;
+    render();
+    createNote(result.id);
+  }
+
+  async function captureElement(sourceNode, { retargetId = null } = {}) {
     if (mode !== "annotating" || operation !== "idle" || modal !== "none") return;
     const metadata = freezeMetadata(sourceNode);
     const clientRect = sourceNode.getBoundingClientRect();
@@ -273,7 +322,8 @@
       captureLifecyclePromise = new Promise((resolve) => { resolveCaptureLifecycle = resolve; });
     }
     const viewport = { width: window.innerWidth, height: window.innerHeight };
-    const transaction = draft.beginCapture({
+    const transaction = (retargetId ? draft.beginElementCapture : draft.beginCapture)({
+      ...(retargetId ? { id: retargetId } : {}),
       sourceNode,
       metadata,
       cropRect,
@@ -287,9 +337,24 @@
       focusRecord(transaction.id);
       return;
     }
+    if (transaction.status === "step-closed") {
+      settleCaptureLifecycle();
+      render();
+      return;
+    }
+    if (transaction.status === "target-already-annotated") {
+      settleCaptureLifecycle();
+      render();
+      focusRecord(transaction.id);
+      return;
+    }
     if (transaction.status === "source-disconnected" ||
         transaction.status === "attempts-exhausted") {
-      failedCapture = { transaction: transaction.transaction, sourceNode, metadata };
+      failedCapture = {
+        transaction: transaction.transaction,
+        sourceNode,
+        metadata,
+      };
       showCaptureFailure(transaction.status === "source-disconnected");
       return;
     }
@@ -308,6 +373,13 @@
     // extension chrome from the source bitmap.
     await twoFrames();
     const restore = hideChrome();
+    let returnAnimationStarted = false;
+    const restoreWithFlourish = () => {
+      restore();
+      if (returnAnimationStarted) return;
+      returnAnimationStarted = true;
+      playCaptureReturnAnimation();
+    };
     await twoFrames();
     let viewportImage;
     let cropImage;
@@ -317,7 +389,7 @@
       viewportImage = capture.capturedImage(response.dataUrl);
       // The raw viewport is already frozen, so restore progress chrome while
       // the crop is decoded and validated.
-      restore();
+      restoreWithFlourish();
       try {
         cropImage = await capture.cropToRect(response.dataUrl, {
           rect: transaction.cropRect,
@@ -331,35 +403,23 @@
       viewportImage = capture.missingImage("screenshot_failure", transaction.attempt, errorMessage(error));
       cropImage = capture.missingImage("screenshot_failure", transaction.attempt, errorMessage(error));
     } finally {
-      restore();
+      restoreWithFlourish();
     }
 
     const result = draft.commitCapture(transaction, { viewportImage, cropImage });
     operation = "idle";
     if (result.status === "committed") {
-      records.set(result.id, { id: result.id, stepId: result.stepId, sourceNode: transaction.sourceNode });
-      selectCreatedStep(transaction, result);
-      failedCapture = null;
-      settleCaptureLifecycle();
-      deliveryConfirmedDegraded = false;
-      render();
-      createNote(result.id);
+      finalizeCommittedCapture(result, transaction);
       return;
     }
-    failedCapture = { transaction, sourceNode: transaction.sourceNode, images: { viewportImage, cropImage } };
+    failedCapture = {
+      transaction,
+      sourceNode: transaction.sourceNode,
+      images: { viewportImage, cropImage },
+    };
     if (transaction.attempt >= 3) {
       const committed = draft.commitIncomplete(transaction, { viewportImage, cropImage });
-      records.set(committed.id, {
-        id: committed.id,
-        stepId: committed.stepId,
-        sourceNode: transaction.sourceNode,
-      });
-      selectCreatedStep(transaction, committed);
-      failedCapture = null;
-      settleCaptureLifecycle();
-      deliveryConfirmedDegraded = false;
-      render();
-      createNote(committed.id);
+      finalizeCommittedCapture(committed, transaction);
       return;
     }
     showCaptureFailure(false);
@@ -367,12 +427,15 @@
 
   async function retryCapture() {
     if (!failedCapture || operation !== "idle") return;
+    const pending = failedCapture;
     closeModal();
-    if (failedCapture.sourceNode.isConnected === false) {
+    if (pending.sourceNode.isConnected === false) {
       showCaptureFailure(true);
       return;
     }
-    await captureElement(failedCapture.sourceNode);
+    await captureElement(pending.sourceNode, {
+      retargetId: pending.transaction.retargetId || null,
+    });
   }
 
   function keepIncomplete() {
@@ -387,26 +450,53 @@
         disconnected ? "source_disconnected" : "crop_failure", attempt),
     };
     const result = draft.commitIncomplete(transaction, images);
-    records.set(result.id, { id: result.id, stepId: result.stepId, sourceNode: transaction.sourceNode });
+    commitRecord(result, transaction);
     selectCreatedStep(transaction, result);
     failedCapture = null;
     settleCaptureLifecycle();
     deliveryConfirmedDegraded = false;
     closeModal();
     render();
-    createNote(result.id);
   }
 
   function selectCreatedStep(transaction, result) {
     if (transaction.createsStep) stepFilter = result.stepId;
   }
 
+  function finalizeCommittedCapture(result, transaction) {
+    commitRecord(result, transaction);
+    selectCreatedStep(transaction, result);
+    failedCapture = null;
+    settleCaptureLifecycle();
+    deliveryConfirmedDegraded = false;
+    render();
+  }
+
+  function commitRecord(result, transaction) {
+    const existing = records.get(result.id);
+    if (!existing) {
+      records.set(result.id, {
+        id: result.id,
+        stepId: result.stepId,
+        sourceNode: transaction.sourceNode,
+        navigation: { path: [transaction.sourceNode], index: 0 },
+        notePosition: null,
+        noteOpen: true,
+      });
+      return;
+    }
+    existing.sourceNode = transaction.sourceNode;
+    existing.stepId = result.stepId;
+  }
+
   function discardFailedCapture() {
+    const id = failedCapture?.transaction?.id;
     if (failedCapture) draft.discardCapture(failedCapture.transaction);
     failedCapture = null;
     settleCaptureLifecycle();
     closeModal();
     render();
+    if (id && records.has(id)) createNote(id);
   }
 
   function showCaptureFailure(disconnected) {
@@ -479,6 +569,11 @@
       return;
     }
     draft.setContext(byId("pi-context")?.value || "");
+    if (draft.hasPendingEvidence()) {
+      setDeliveryError("Send every open Element annotation before submitting.");
+      render();
+      return;
+    }
     if (draft.hasMissingEvidence() && !deliveryConfirmedDegraded) {
       const affected = missingEvidenceLabels(draft.snapshot());
       showModal("degradedDelivery", {
@@ -555,10 +650,11 @@
     panelEl.classList.toggle("pi-interacting", mode === "interacting");
     panelEl.classList.toggle("pi-minimized", minimized && mode === "annotating");
     panelEl.classList.toggle("pi-busy", operation !== "idle");
+    projectPanelPosition();
     const busy = operation !== "idle";
     const snapshot = draft.snapshot();
     const draftMutationBlocked = busy || snapshot.capture !== null;
-    for (const id of ["pi-pause", "pi-submit", "pi-cancel", "pi-close", "pi-undo", "pi-context", "pi-etch-mode", "pi-debug-mode"]) {
+    for (const id of ["pi-pause", "pi-submit", "pi-close", "pi-undo", "pi-help", "pi-minimize", "pi-context", "pi-etch-mode", "pi-debug-mode"]) {
       const control = byId(id);
       if (control) control.disabled = draftMutationBlocked;
     }
@@ -572,9 +668,23 @@
     if (submitButton) {
       submitButton.disabled = draftMutationBlocked;
       submitButton.textContent = operation === "delivering" ? "Sending…" : (deliveryError ? "Retry" : "Submit");
+      submitButton.title = snapshot.hasPendingEvidence
+        ? "Send every open Element annotation before submitting"
+        : "";
     }
     const undo = byId("pi-undo");
-    if (undo) undo.disabled = draftMutationBlocked || !snapshot.canUndo;
+    if (undo) {
+      undo.hidden = !snapshot.canUndo;
+      undo.disabled = draftMutationBlocked;
+    }
+    const bubbleCount = byId("pi-bubble-count");
+    if (bubbleCount) bubbleCount.textContent = String(snapshot.steps.reduce(
+      (count, step) => count + step.elements.length, 0));
+    const advanced = byId("pi-advanced");
+    advanced?.classList.toggle("pi-debug-enabled", debugMode);
+    advanced?.querySelector?.("summary")?.setAttribute(
+      "aria-label", debugMode ? "More options, Debug capture enabled" : "More options");
+    panelEl.setAttribute("aria-busy", String(draftMutationBlocked));
     panelEl.querySelectorAll?.(".pi-step-filter").forEach((control) => { control.disabled = draftMutationBlocked; });
     notesEl?.querySelectorAll?.("button, textarea").forEach((control) => { control.disabled = draftMutationBlocked; });
     const error = byId("pi-delivery-error");
@@ -583,11 +693,28 @@
       error.hidden = !deliveryError;
     }
     const evidenceVisible = mode === "annotating";
+    if (connectorsEl) connectorsEl.style.display = evidenceVisible ? "" : "none";
     if (markersEl) markersEl.style.display = evidenceVisible ? "" : "none";
     if (notesEl) notesEl.style.display = evidenceVisible ? "" : "none";
     if (!evidenceVisible) hideHighlight();
     renderFilmstrip();
     renderEvidence();
+  }
+
+  function projectPanelPosition() {
+    const compact = mode === "interacting" || minimized;
+    if (compact && bubblePosition) {
+      Object.assign(panelEl.style, {
+        left: `${bubblePosition.x}px`, top: `${bubblePosition.y}px`,
+        right: "auto", bottom: "auto",
+      });
+      return;
+    }
+    if (!compact) {
+      for (const property of ["left", "top", "right", "bottom"]) {
+        panelEl.style[property] = "";
+      }
+    }
   }
 
   function currentResult() {
@@ -599,8 +726,10 @@
     const filmstrip = byId("pi-filmstrip");
     if (!filmstrip) return;
     const result = currentResult();
+    const total = result.steps.reduce((count, step) => count + step.elements.length, 0);
     filmstrip.innerHTML = `<button class="pi-step-filter ${stepFilter === "all" ? "active" : ""}"
-      id="pi-filter-all" data-step="all">All steps</button>`;
+      id="pi-filter-all" data-step="all" aria-pressed="${stepFilter === "all"}"
+      aria-label="All steps, ${total} element annotations"><span>All steps</span><span>${total}</span></button>`;
     byId("pi-filter-all")?.addEventListener("click", () => setFilter("all"));
     result.steps.forEach((step, index) => {
       const button = document.createElement("button");
@@ -608,9 +737,12 @@
       button.disabled = operation !== "idle";
       button.dataset.step = step.id;
       button.setAttribute("aria-pressed", String(stepFilter === step.id));
-      const thumbnail = step.viewportImage.status === "captured"
+      button.setAttribute("aria-label", `Step ${index + 1}, ${step.elements.length} element annotations`);
+      const thumbnail = step.viewportImage?.status === "captured"
         ? `<img class="pi-step-thumbnail" src="${step.viewportImage.dataUrl}" alt="">`
-        : `<span class="pi-step-thumbnail pi-step-missing" aria-label="Viewport screenshot missing">!</span>`;
+        : step.viewportImage?.status === "missing"
+          ? `<span class="pi-step-thumbnail pi-step-missing" aria-label="Viewport screenshot missing">!</span>`
+          : `<span class="pi-step-thumbnail pi-step-pending" aria-label="Viewport screenshot pending">…</span>`;
       button.innerHTML = `${thumbnail}<span>Step ${index + 1}</span><span>${step.elements.length}</span>` +
         (stepFilter !== "all" && stepFilter !== step.id
           ? `<span class="pi-step-hidden" aria-label="Hidden by step filter">◉̸</span>` : "");
@@ -623,22 +755,38 @@
     if (!markersEl || !notesEl) return;
     const result = currentResult();
     const visible = [];
-    result.steps.forEach((step) => {
+    result.steps.forEach((step, stepIndex) => {
       if (stepFilter !== "all" && stepFilter !== step.id) return;
-      step.elements.forEach((element) => visible.push({ step, element }));
+      step.elements.forEach((element, elementIndex) => visible.push({
+        step,
+        element,
+        markerNumber: `${stepIndex + 1}.${elementIndex + 1}`,
+      }));
     });
     markersEl.innerHTML = "";
-    for (const { element } of visible) {
+    for (const { element, markerNumber } of visible) {
       const record = records.get(element.id);
       const source = record?.sourceNode;
       if (!source || source.isConnected === false) continue;
       const rect = source.getBoundingClientRect();
+      if (element.id === activeRecordId) {
+        const outline = document.createElement("div");
+        outline.className = "pi-marker-outline pi-current-target-outline";
+        outline.dataset.annotationId = element.id;
+        outline.setAttribute("aria-label", "Current Element annotation target");
+        Object.assign(outline.style, {
+          left: `${rect.left}px`, top: `${rect.top}px`,
+          width: `${rect.width}px`, height: `${rect.height}px`,
+        });
+        markersEl.appendChild(outline);
+      }
       const marker = document.createElement("button");
       marker.className = "pi-marker-badge";
       marker.dataset.annotationId = element.id;
-      marker.style.left = `${rect.right - 14}px`;
-      marker.style.top = `${rect.top - 14}px`;
-      marker.textContent = String(visible.findIndex((item) => item.element.id === element.id) + 1);
+      marker.style.left = `${rect.right}px`;
+      marker.style.top = `${rect.top}px`;
+      marker.textContent = String(markerNumber);
+      marker.setAttribute("aria-label", `Open Element annotation ${markerNumber}`);
       marker.addEventListener("click", (event) => {
         event.preventDefault();
         event.stopPropagation();
@@ -648,13 +796,43 @@
     }
     for (const card of Array.from(notesEl.children)) {
       const id = card.dataset?.annotationId;
-      if (!visible.some((item) => item.element.id === id)) card.remove();
-      else updateHistorical(card, visible.find((item) => item.element.id === id).element);
+      if (!visible.some((item) => item.element.id === id) || records.get(id)?.noteOpen === false) {
+        card.remove();
+      }
+      else {
+        updateNoteCard(card, visible.find((item) => item.element.id === id).element);
+        const bounds = card.getBoundingClientRect();
+        placeNoteCard(card, { left: bounds.left, top: bounds.top });
+      }
     }
     for (const { element } of visible) {
-      if (!notesEl.querySelector?.(`[data-annotation-id="${element.id}"]`)) {
+      if (records.get(element.id)?.noteOpen !== false &&
+          !notesEl.querySelector?.(`[data-annotation-id="${element.id}"]`)) {
         createNote(element.id, { focus: false });
       }
+    }
+    renderConnectors();
+  }
+
+  function renderConnectors() {
+    if (!connectorsEl || !markersEl || !notesEl) return;
+    connectorsEl.innerHTML = "";
+    for (const card of notesEl.querySelectorAll?.(".pi-note-card") || []) {
+      const id = card.dataset.annotationId;
+      const marker = markersEl.querySelector?.(`.pi-marker-badge[data-annotation-id="${id}"]`);
+      if (!marker || card.style.visibility === "hidden") continue;
+      const markerBounds = marker.getBoundingClientRect();
+      const cardBounds = card.getBoundingClientRect();
+      const startX = markerBounds.left + markerBounds.width / 2;
+      const startY = markerBounds.top + markerBounds.height / 2;
+      const endX = Math.max(cardBounds.left, Math.min(startX, cardBounds.right));
+      const endY = Math.max(cardBounds.top, Math.min(startY, cardBounds.bottom));
+      const bendX = startX + (endX - startX) / 2;
+      const path = document.createElementNS("http://www.w3.org/2000/svg", "path");
+      path.classList.add("pi-connector");
+      path.dataset.annotationId = id;
+      path.setAttribute("d", `M ${startX} ${startY} C ${bendX} ${startY}, ${bendX} ${endY}, ${endX} ${endY}`);
+      connectorsEl.appendChild(path);
     }
   }
 
@@ -662,8 +840,13 @@
     const result = currentResult();
     const element = result.steps.flatMap((step) => step.elements).find((item) => item.id === id);
     if (!element) return;
+    const record = records.get(id);
+    if (record) record.noteOpen = true;
     let card = notesEl.querySelector?.(`[data-annotation-id="${id}"]`);
     if (card) {
+      if (focus) activeRecordId = id;
+      updateNoteCard(card, element);
+      if (focus) renderEvidence();
       if (focus) card.querySelector?.(".pi-note-textarea")?.focus();
       return;
     }
@@ -674,22 +857,74 @@
       <div class="pi-note-header">
         <span class="pi-note-selector">${inspect.escapeHtml(element.metadata.selector)}</span>
         <span class="pi-historical" role="status"></span>
+        <button class="pi-note-expand" aria-label="Move Element annotation to parent">▲</button>
+        <button class="pi-note-contract" aria-label="Move Element annotation toward original element">▼</button>
         <button class="pi-note-close" aria-label="Delete element annotation">×</button>
       </div>
       <div class="pi-note-body">
         <textarea class="pi-note-textarea" placeholder="Describe changes for this element...">${inspect.escapeHtml(element.comment)}</textarea>
+        <div class="pi-note-actions">
+          <button class="pi-note-send" type="button" aria-label="Send comment">Send</button>
+        </div>
       </div>`;
-    const source = records.get(id)?.sourceNode;
+    const source = record?.sourceNode;
     const rect = source?.getBoundingClientRect?.() || { right: 24, top: 24 };
-    card.style.left = `${Math.min(rect.right + 16, window.innerWidth - 296)}px`;
-    card.style.top = `${Math.max(16, rect.top)}px`;
+    card.style.visibility = "hidden";
     card.querySelector?.(".pi-note-textarea")?.addEventListener("input", (event) => {
       if (operation === "idle") draft.updateComment(id, event.target.value);
     });
     card.querySelector?.(".pi-note-close")?.addEventListener("click", () => deleteRecord(id));
+    card.querySelector?.(".pi-note-send")?.addEventListener("click", () => { void sendNote(id); });
+    card.querySelector?.(".pi-note-expand")?.addEventListener("click", () => moveElementTarget(id, "up"));
+    card.querySelector?.(".pi-note-contract")?.addEventListener("click", () => moveElementTarget(id, "down"));
+    card.querySelector?.(".pi-note-header")?.addEventListener("mousedown", (event) => {
+      if (event.button !== 0 || operation !== "idle" || modal !== "none" ||
+          event.target.closest?.("button")) return;
+      const bounds = card.getBoundingClientRect();
+      noteDrag = {
+        card,
+        id,
+        startX: event.clientX,
+        startY: event.clientY,
+        startLeft: bounds.left,
+        startTop: bounds.top,
+      };
+      card.classList.add("dragging");
+      event.preventDefault();
+    });
+    card.addEventListener("focusin", () => {
+      if (activeRecordId === id) return;
+      activeRecordId = id;
+      renderEvidence();
+    });
     notesEl.appendChild(card);
-    updateHistorical(card, element);
+    placeNoteCard(card, record?.notePosition || { left: rect.right + 16, top: rect.top });
+    card.style.visibility = "";
+    updateNoteCard(card, element);
+    if (focus) {
+      activeRecordId = id;
+      renderEvidence();
+    }
     if (focus) card.querySelector?.(".pi-note-textarea")?.focus();
+  }
+
+  function placeNoteCard(card, preferred) {
+    const margin = 16;
+    card.style.maxHeight = "";
+    const bounds = card.getBoundingClientRect();
+    const maxLeft = Math.max(margin, window.innerWidth - bounds.width - margin);
+    const panelBounds = panelEl?.getBoundingClientRect?.();
+    const reservesBottom = mode === "annotating" && !minimized && panelBounds?.top > margin;
+    const availableBottom = reservesBottom ? panelBounds.top - 12 : window.innerHeight - margin;
+    const availableHeight = Math.max(96, availableBottom - margin);
+    card.style.maxHeight = `${availableHeight}px`;
+    const resizedBounds = card.getBoundingClientRect();
+    const maxTop = Math.max(margin, availableBottom - resizedBounds.height);
+    const left = Math.min(Math.max(margin, preferred.left), maxLeft);
+    const top = Math.min(Math.max(margin, preferred.top), maxTop);
+    card.style.left = `${left}px`;
+    card.style.top = `${top}px`;
+    return { left, top };
   }
 
   function updateHistorical(card, element) {
@@ -699,13 +934,102 @@
     status.hidden = !element.historical;
   }
 
+  function updateNoteCard(card, element) {
+    updateHistorical(card, element);
+    const selector = card.querySelector?.(".pi-note-selector");
+    if (selector) {
+      selector.textContent = element.metadata.selector;
+      selector.title = element.metadata.selector;
+    }
+    updateNavigationControls(card, element.id);
+  }
+
+  function updateNavigationControls(card, id) {
+    const record = records.get(id);
+    const moveUp = card.querySelector?.(".pi-note-expand");
+    const moveDown = card.querySelector?.(".pi-note-contract");
+    if (!moveUp || !moveDown || !record) return;
+
+    const currentStep = draft.isCurrentStep(id);
+    const blocked = operation !== "idle" || modal !== "none";
+    const sourceAvailable = record.sourceNode?.isConnected !== false;
+    const parent = sourceAvailable ? record.sourceNode.parentElement : null;
+    const canMoveUp = parent && parent !== document.body && parent !== document.documentElement &&
+      !inspect.isPiElement(parent);
+    const canMoveDown = record.navigation.index > 0 &&
+      record.navigation.path[record.navigation.index - 1]?.isConnected !== false;
+    const closedReason = "Element cannot be changed after its interaction step is closed";
+    const unavailableReason = "The current source element is no longer available";
+    const busyReason = "Wait for the current annotation operation to finish";
+
+    moveUp.disabled = blocked || !currentStep || !sourceAvailable || !canMoveUp;
+    moveDown.disabled = blocked || !currentStep || !sourceAvailable || !canMoveDown;
+    moveUp.title = blocked ? busyReason :
+      !currentStep ? closedReason :
+      !sourceAvailable ? unavailableReason :
+      !canMoveUp ? "No parent element is available" :
+      "Move Element annotation to parent";
+    moveDown.title = blocked ? busyReason :
+      !currentStep ? closedReason :
+      !sourceAvailable ? unavailableReason :
+      !canMoveDown ? "Already at the original element" :
+      "Move Element annotation toward original element";
+  }
+
+  function moveElementTarget(id, direction) {
+    if (operation !== "idle" || modal !== "none" || !draft.canRetarget(id)) return;
+    const record = records.get(id);
+    if (!record?.navigation || record.sourceNode?.isConnected === false) return;
+
+    let target;
+    let targetIndex;
+    let truncate = false;
+    if (direction === "up") {
+      target = record.sourceNode.parentElement;
+      if (!target || target === document.body || target === document.documentElement || inspect.isPiElement(target)) {
+        return;
+      }
+      targetIndex = record.navigation.index + 1;
+      truncate = true;
+    } else {
+      targetIndex = record.navigation.index - 1;
+      target = record.navigation.path[targetIndex];
+      if (targetIndex < 0 || !target || target.isConnected === false) return;
+    }
+
+    const result = draft.retargetElement({
+      id,
+      sourceNode: target,
+      metadata: freezeMetadata(target),
+    });
+    if (result.status !== "retargeted") return;
+    record.sourceNode = target;
+    record.navigation.path[targetIndex] = target;
+    if (truncate) record.navigation.path.length = targetIndex + 1;
+    record.navigation.index = targetIndex;
+    deliveryConfirmedDegraded = false;
+    renderEvidence();
+  }
+
   function deleteRecord(id) {
     if (operation !== "idle" || modal !== "none" || !draft.softDelete(id)) return;
+    if (activeRecordId === id) activeRecordId = null;
     notesEl.querySelector?.(`[data-annotation-id="${id}"]`)?.remove();
     byId("pi-undo") && (byId("pi-undo").disabled = false);
     if (!currentResult().steps.some((step) => step.id === stepFilter)) stepFilter = "all";
     deliveryConfirmedDegraded = false;
     render();
+  }
+
+  async function sendNote(id) {
+    if (operation !== "idle" || modal !== "none") return;
+    const record = records.get(id);
+    if (!record?.sourceNode || record.sourceNode.isConnected === false) return;
+    record.noteOpen = false;
+    if (activeRecordId === id) activeRecordId = null;
+    notesEl.querySelector?.(`[data-annotation-id="${id}"]`)?.remove();
+    renderEvidence();
+    await captureElement(record.sourceNode, { retargetId: id });
   }
 
   function undoDelete() {
@@ -777,6 +1101,7 @@
   function onPageClick(event) {
     if (!active || mode !== "annotating" ||
         event.target.closest?.("#pi-panel") || event.target.closest?.(".pi-note-card") ||
+        event.target.closest?.("#pi-markers") ||
         event.target.closest?.(".pi-modal-backdrop") ||
         event.target.closest?.(".pi-abort-backdrop")) return;
     event.preventDefault();
@@ -786,7 +1111,7 @@
     // clicks are ignored rather than leaking through to the site.
     if (operation !== "idle" || modal !== "none") return;
     const source = hovered || event.target;
-    if (source && !inspect.isPiElement(source)) void captureElement(source);
+    if (source && !inspect.isPiElement(source)) selectElement(source);
   }
 
   function hideHighlight() {
@@ -796,7 +1121,7 @@
   function hideChrome() {
     hideHighlight();
     etch.clearMarkers();
-    const elements = [panelEl, markersEl, notesEl].filter(Boolean);
+    const elements = [panelEl, connectorsEl, markersEl, notesEl].filter(Boolean);
     const display = elements.map((element) => [element, element.style.display]);
     elements.forEach((element) => { element.style.display = "none"; });
     return () => {
@@ -805,6 +1130,22 @@
         if (element.isConnected) element.style.display = value;
       });
     };
+  }
+
+  function playCaptureReturnAnimation() {
+    cleanupCaptureReturnAnimation();
+    for (const surface of [panelEl, connectorsEl, markersEl, notesEl]) {
+      if (surface?.isConnected) surface.classList.add("pi-rematerializing");
+    }
+    captureReturnTimer = setTimeout(cleanupCaptureReturnAnimation, 800);
+  }
+
+  function cleanupCaptureReturnAnimation() {
+    if (captureReturnTimer !== null) clearTimeout(captureReturnTimer);
+    captureReturnTimer = null;
+    for (const surface of [panelEl, connectorsEl, markersEl, notesEl]) {
+      surface?.classList.remove("pi-rematerializing");
+    }
   }
 
   function twoFrames() {
@@ -835,6 +1176,16 @@
   }
 
   function onDragMove(event) {
+    if (noteDrag) {
+      const position = placeNoteCard(noteDrag.card, {
+        left: noteDrag.startLeft + event.clientX - noteDrag.startX,
+        top: noteDrag.startTop + event.clientY - noteDrag.startY,
+      });
+      const record = records.get(noteDrag.id);
+      if (record) record.notePosition = position;
+      renderConnectors();
+      return;
+    }
     if (!bubbleDrag || !panelEl) return;
     const dx = event.clientX - bubbleDrag.x;
     const dy = event.clientY - bubbleDrag.y;
@@ -853,6 +1204,8 @@
 
   function endBubbleDrag() {
     bubbleDrag = null;
+    noteDrag?.card?.classList.remove("dragging");
+    noteDrag = null;
   }
 
   function onResize() {
@@ -866,7 +1219,8 @@
   }
 
   function onPageMutations(mutations) {
-    const sources = Array.from(records.values(), (record) => record.sourceNode).filter(Boolean);
+    const sources = Array.from(records.values()).flatMap((record) =>
+      [record.sourceNode, ...(record.navigation?.path || [])]).filter(Boolean);
     if (sources.length === 0 || livenessFrame !== null) return;
     const affectsSource = mutations.some((mutation) =>
       [...mutation.addedNodes, ...mutation.removedNodes].some((node) =>
@@ -929,8 +1283,41 @@
         ["Continue annotating", closeModal, "primary"],
         ["Abort annotation", () => deactivate()],
       ],
-      returnFocus: byId("pi-cancel"),
+      returnFocus: byId("pi-close"),
     });
+  }
+
+  function showHelpDialog() {
+    if (operation !== "idle" || modal !== "none") return;
+    modal = "help";
+    lastFocusedControl = byId("pi-help");
+    const iconUrl = chrome.runtime.getURL?.("assets/grinsekatze.svg") ||
+      "assets/grinsekatze.svg";
+    const backdrop = document.createElement("div");
+    backdrop.className = "pi-modal-backdrop pi-help-backdrop";
+    backdrop.innerHTML = `
+      <section class="pi-modal pi-help-dialog" role="dialog" aria-modal="true"
+        aria-labelledby="pi-help-title">
+        <header class="pi-help-header">
+          <img class="pi-grinsekatze-icon" src="${iconUrl}" alt="Grinsekatze">
+          <div><h2 id="pi-help-title">How to annotate</h2>
+            <p>Share clear visual feedback with your annotation session.</p></div>
+          <button class="pi-icon-button pi-help-close" aria-label="Close help">×</button>
+        </header>
+        <ol class="pi-help-steps">
+          <li><strong>Select an element</strong><span>Click an element and write its Element annotation.</span></li>
+          <li><strong>Create interaction steps</strong><span>Use Interact with page, then Resume annotation after interacting.</span></li>
+          <li><strong>Add general context and submit</strong><span>Describe the overall goal, then submit the annotation.</span></li>
+        </ol>
+        <p class="pi-help-tip"><strong>Etch</strong> records visible edits. Press <kbd>Escape</kbd> three times to abort.</p>
+      </section>`;
+    backdrop.querySelector?.(".pi-help-close")?.addEventListener("click", closeModal);
+    backdrop.addEventListener("click", (event) => {
+      if (event.target === backdrop) closeModal();
+    });
+    document.body.appendChild(backdrop);
+    routeDialog = backdrop;
+    backdrop.querySelector?.(".pi-help-close")?.focus();
   }
 
   function onKeyDown(event) {

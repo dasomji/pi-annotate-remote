@@ -235,9 +235,10 @@ export const test = base.extend({
     const configure = async ({ failures = 0, delayMs = 0 } = {}) => {
       await extensionWorker.evaluate(({ failures, delayMs }) => {
         globalThis.__piE2ECaptureOriginal ||= chrome.tabs.captureVisibleTab.bind(chrome.tabs);
-        globalThis.__piE2ECaptureState = { failures, delayMs };
+        globalThis.__piE2ECaptureState = { failures, delayMs, count: 0 };
         chrome.tabs.captureVisibleTab = (windowId, options, callback) => {
           const state = globalThis.__piE2ECaptureState;
+          state.count += 1;
           if (state.failures > 0) {
             state.failures -= 1;
             setTimeout(() => callback(undefined), state.delayMs);
@@ -249,7 +250,10 @@ export const test = base.extend({
         };
       }, { failures, delayMs });
     };
-    await use({ configure });
+    const count = () => extensionWorker.evaluate(
+      () => globalThis.__piE2ECaptureState?.count || 0,
+    );
+    await use({ configure, count });
   },
 
   workflow: async ({ context, extensionWorker, fixtureServer, captureControl }, use) => {

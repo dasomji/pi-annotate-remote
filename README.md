@@ -116,19 +116,20 @@ A session remains available until `/annotate off`, Pi exits, or its broker conne
 | Set or repair the shortcut | Settings cog → **Edit shortcut**, then assign it in Chrome’s extension-shortcut page |
 | Start annotation | Select an annotation session and click **Start annotation** |
 | Add an Element annotation | Click the page; consecutive Element annotations remain in the current Interaction step |
-| Operate the site | Click **Pause & interact**; annotation UI is replaced by the paused π bubble |
-| Resume annotation | Click the paused π bubble, or focus it and press Enter/Space |
+| Operate the site | Click **Interact with page**; the two-bar UI is replaced by the Grinsekatze resume bubble |
+| Resume annotation | Click the Grinsekatze resume bubble, or focus it and press Enter/Space |
 | Review the workflow | Choose **All steps** or an individual step in the viewport filmstrip |
 | Delete and restore evidence | Delete from its note card; use **Undo delete** to restore it in place |
 | Cycle ancestors | `Alt/⌥` + scroll while hovering |
+| Retarget an Element annotation | Use ▲/▼ in its card to move along the exact original DOM branch; controls become read-only after its Interaction step closes |
 | Add a comment | Type in the floating note card |
-| Minimize the bar | Click `−`; drag the floating π bubble and click it to restore |
+| Minimize the bars | Click `−`; drag the floating Grinsekatze bubble and click it to restore |
 | Record browser edits | Enable **Etch**; recording pauses while the site is interactive |
-| Include diagnostic CSS context | Enable **Debug** before selecting an element |
+| Include diagnostic CSS context | Open **More options**, then enable **Debug capture** before selecting an element |
 | Submit | Click **Submit**; missing mandatory evidence requires explicit confirmation |
-| Cancel | Click **Cancel**, or press Escape three times and confirm **Abort annotation** |
+| Abort | Click the close control, or press Escape three times and confirm **Abort annotation** |
 
-The annotation bar floats 20px above the bottom edge with 30px side margins. Its general-context field is multiline. The first accepted Element annotation creates Step 1 lazily. Pausing and resuming arms the next step without creating an empty one. Minimized Annotation mode remains distinct from Interaction mode: minimized page clicks still annotate, while the paused π bubble returns page input to the site. All annotation chrome is hidden during screenshot capture.
+The interaction-step filmstrip floats directly above a focused two-line composer near the bottom edge. The first accepted Element annotation creates Step 1 lazily. Interacting and resuming arms the next step without creating an empty one. Minimized Annotation mode remains distinct from Interaction mode: minimized page clicks still annotate, while the Grinsekatze resume bubble returns page input to the site. All annotation chrome is hidden during screenshot capture.
 
 Escape never aborts immediately. It first blurs an active annotation field. Three non-repeated Escape presses within two seconds open an accessible confirmation dialog; Escape closes that dialog, and only **Abort annotation** discards the work.
 
