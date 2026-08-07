@@ -52,7 +52,6 @@
   let livenessObserver = null;
   let livenessFrame = null;
   let captureReturnTimer = null;
-  let captureReturnEl = null;
 
   let draft = createDraft({ createId: makeId });
   const records = new Map();
@@ -1132,26 +1131,15 @@
 
   function playCaptureReturnAnimation() {
     cleanupCaptureReturnAnimation();
-    const flourish = document.createElement("div");
-    flourish.className = "pi-grinsekatze-rematerialize";
-    flourish.setAttribute("aria-hidden", "true");
-    const iconUrl = chrome.runtime.getURL?.("assets/grinsekatze.svg") ||
-      "assets/grinsekatze.svg";
-    flourish.innerHTML = `<span>Poof!</span><img src="${iconUrl}" alt="">`;
-    document.body.appendChild(flourish);
-    captureReturnEl = flourish;
-
     for (const surface of [panelEl, connectorsEl, markersEl, notesEl]) {
       if (surface?.isConnected) surface.classList.add("pi-rematerializing");
     }
-    captureReturnTimer = setTimeout(cleanupCaptureReturnAnimation, 1100);
+    captureReturnTimer = setTimeout(cleanupCaptureReturnAnimation, 800);
   }
 
   function cleanupCaptureReturnAnimation() {
     if (captureReturnTimer !== null) clearTimeout(captureReturnTimer);
     captureReturnTimer = null;
-    captureReturnEl?.remove();
-    captureReturnEl = null;
     for (const surface of [panelEl, connectorsEl, markersEl, notesEl]) {
       surface?.classList.remove("pi-rematerializing");
     }

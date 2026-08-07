@@ -243,17 +243,17 @@ test("Send collapses an Element annotation to its numbered marker and the marker
     .toBe("Keep this comment after collapsing");
 });
 
-test("Grinsekatze rematerializes the annotator after Send captures the clean page", async ({ workflow }) => {
+test("the annotator softly rematerializes without a flourish after Send captures the clean page", async ({ workflow }) => {
   const { page } = workflow;
   const card = await annotate(page, "#state-one", "Make the screenshot flash delightful");
-  const flourish = page.locator(".pi-grinsekatze-rematerialize");
 
   await card.getByRole("button", { name: "Send comment" }).click();
 
-  await expect(flourish).toBeVisible();
-  await expect(flourish.locator("img")).toHaveAttribute("src", /assets\/grinsekatze\.svg$/);
-  await expect(page.locator("#pi-panel")).toHaveClass(/pi-rematerializing/);
-  await expect(flourish).toHaveCount(0, { timeout: 2500 });
+  await expect.poll(() => page.evaluate(() => ({
+    bouncing: document.querySelector("#pi-panel")?.classList.contains("pi-rematerializing"),
+    flourishes: document.querySelectorAll(".pi-grinsekatze-rematerialize").length,
+  }))).toEqual({ bouncing: true, flourishes: 0 });
+  await expect(page.locator("#pi-panel")).not.toHaveClass(/pi-rematerializing/, { timeout: 1500 });
 });
 
 test("step filtering defaults to the current step and preserves other evidence", async ({ workflow }) => {
