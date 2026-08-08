@@ -1,6 +1,11 @@
 import { test, expect } from "./fixtures/extension.js";
 import { annotate, submitAnnotation as submit } from "./helpers/annotation.js";
 
+async function enableEtch(page) {
+  await page.getByRole("button", { name: "More options" }).click();
+  await page.getByRole("checkbox", { name: "Etch" }).check();
+}
+
 test("delivers an atomic schema-v2 screenshot capture through the broker", async ({ workflow }) => {
   const { page, server, captureControl } = workflow;
   await captureControl.configure({ delayMs: 450 });
@@ -94,7 +99,7 @@ test("enabled Etch starts a fresh recording period after delivery failure", asyn
   const { page, server } = workflow;
   server.state.failDeliveries = 1;
   await page.locator("#pi-context").fill("Retry Etch recording");
-  await page.locator("label.pi-etch-toggle").click();
+  await enableEtch(page);
   await page.locator("#state-one").evaluate((element) => {
     element.style.color = "rgb(200, 0, 0)";
   });
@@ -121,7 +126,7 @@ test("enabled Etch starts a fresh recording period after delivery failure", asyn
 test("submit delivers an Etch finalization warning when its screenshot fails", async ({ workflow }) => {
   const { page, server, captureControl } = workflow;
   await page.locator("#pi-context").fill("Etch warning delivery");
-  await page.locator("label.pi-etch-toggle").click();
+  await enableEtch(page);
   await expect(page.locator("#pi-etch-mode")).toBeChecked();
   await page.locator("#state-one").evaluate((element) => {
     element.style.color = "rgb(200, 0, 0)";
@@ -159,7 +164,7 @@ test("Pause and Resume expose keyboard-operable, mode-specific controls with vis
 test("Etch records ordered annotation periods but excludes the paused mutation period", async ({ workflow }) => {
   const { page, server } = workflow;
   await page.locator("#pi-context").fill("Etch period acceptance");
-  await page.locator("label.pi-etch-toggle").click();
+  await enableEtch(page);
   await expect(page.locator("#pi-etch-mode")).toBeChecked();
 
   await page.locator("#state-one").evaluate((element) => {

@@ -8,7 +8,7 @@ test("the annotator presents a filmstrip above a focused composer", async ({ wor
 
   await expect(steps).toBeVisible();
   await expect(composer).toBeVisible();
-  await expect(steps.getByRole("img", { name: "Grinsekatze" })).toHaveCount(0);
+  await expect(page.locator("#pi-panel img")).toHaveCount(0);
   await expect(steps.getByRole("button", { name: /All steps/ })).toHaveAttribute("aria-pressed", "true");
   await expect(steps.getByRole("button", { name: "Interact with page" })).toBeVisible();
   await expect(steps.getByRole("button", { name: "How to annotate" })).toBeVisible();

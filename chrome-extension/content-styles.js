@@ -411,7 +411,6 @@
     }
 
     #pi-panel.pi-minimized .pi-minimized-bubble { display: flex; }
-    .pi-bubble-logo { font-size: 20px; font-weight: 700; line-height: 20px; }
     .pi-bubble-count { color: var(--pi-fg-muted); font-size: 10px; line-height: 12px; }
 
     .pi-header {
@@ -960,12 +959,12 @@
     }
     .pi-delivery-error { max-width: 180px; }
     .pi-composer .pi-btn-submit { min-width: 96px; border-radius: 10px; }
-    .pi-composer .pi-etch-toggle {
+    .pi-advanced-menu .pi-etch-toggle {
       position: relative;
-      flex: none;
-      align-self: stretch;
       justify-content: center;
-      min-width: 68px;
+      min-height: 34px;
+      width: 100%;
+      margin-bottom: 8px;
       border-radius: 10px;
     }
 
@@ -1004,8 +1003,6 @@
       background: var(--pi-bg-card);
       box-shadow: 0 4px 24px var(--pi-shadow);
     }
-
-    .pi-bubble-logo { width: 30px; height: 30px; border-radius: 8px; }
 
     .pi-help-dialog {
       box-sizing: border-box;
@@ -1047,7 +1044,6 @@
       .pi-btn-pause { padding-inline: 8px; }
       .pi-composer { min-height: 58px; padding: 5px; }
       .pi-composer textarea { height: 46px; padding-inline: 6px; }
-      .pi-composer .pi-etch-toggle { min-width: 52px; padding-inline: 6px; }
       .pi-composer .pi-btn-submit { min-width: 72px; padding-inline: 8px; }
       .pi-composer { flex-wrap: wrap; }
       .pi-composer-status {
@@ -1090,11 +1086,7 @@
         backdrop-filter: blur(18px);
       }
       #pi-panel.pi-steps-expanded .pi-step-strip .pi-filmstrip { display: flex; }
-      .pi-advanced-menu .pi-etch-toggle {
-        min-height: 34px;
-        margin-bottom: 8px;
-        justify-content: flex-start;
-      }
+      .pi-advanced-menu .pi-etch-toggle { justify-content: flex-start; }
     }
 
     #pi-panel button:focus-visible,

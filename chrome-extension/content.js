@@ -121,18 +121,16 @@
   }
 
   function createPanel() {
-    const grinsekatzeIcon = chrome.runtime.getURL?.("assets/grinsekatze.svg") ||
-      "assets/grinsekatze.svg";
     panelEl = document.createElement("div");
     panelEl.id = "pi-panel";
     panelEl.innerHTML = `
       <button class="pi-resume-bubble" id="pi-resume-bubble" type="button"
         aria-label="Resume annotation" title="Resume annotation">
-        <img class="pi-bubble-logo" src="${grinsekatzeIcon}" alt=""><span>Resume</span>
+        <span>Resume</span>
       </button>
       <button class="pi-minimized-bubble" id="pi-minimized-bubble" type="button"
         aria-label="Restore annotation bar" title="Restore annotation bar">
-        <img class="pi-bubble-logo" src="${grinsekatzeIcon}" alt=""><span class="pi-bubble-count" id="pi-bubble-count">0</span>
+        <span class="pi-bubble-count" id="pi-bubble-count">0</span>
       </button>
       <nav class="pi-step-strip" aria-label="Interaction steps">
         <button class="pi-btn pi-btn-secondary pi-steps-toggle" id="pi-steps-toggle"
