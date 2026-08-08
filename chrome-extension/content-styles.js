@@ -850,15 +850,7 @@
       border-radius: 16px;
     }
 
-    .pi-grinsekatze-icon {
-      display: block;
-      flex: none;
-      width: 34px;
-      height: 34px;
-      border: 1px solid var(--pi-border-muted);
-      border-radius: 9px;
-      background: #fcfaf5;
-    }
+    .pi-steps-toggle { display: none; }
 
     .pi-filmstrip {
       flex: 1 1 auto;
@@ -942,6 +934,10 @@
       background: transparent;
       color: var(--pi-fg);
       font: 12px/18px var(--pi-font-ui);
+      overflow-y: auto;
+      overscroll-behavior: contain;
+      touch-action: pan-y;
+      -webkit-overflow-scrolling: touch;
     }
 
     .pi-composer textarea:focus {
@@ -1046,7 +1042,6 @@
       #pi-panel { left: 8px; right: 8px; bottom: 8px; gap: 6px; }
       .pi-step-strip,
       .pi-composer { width: calc(100vw - 16px); }
-      .pi-grinsekatze-icon { width: 30px; height: 30px; }
       .pi-step-strip { gap: 4px; padding: 5px; }
       .pi-step-strip .pi-filmstrip { min-width: 0; }
       .pi-btn-pause { padding-inline: 8px; }
@@ -1062,6 +1057,44 @@
         padding: 2px 6px 4px;
       }
       .pi-composer-status .pi-delivery-error { max-width: none; }
+    }
+
+    @media (max-width: 820px) and (orientation: portrait) {
+      .pi-step-strip { position: relative; justify-content: flex-end; }
+      .pi-steps-toggle {
+        display: inline-flex;
+        align-items: center;
+        min-height: 34px;
+        margin-right: auto;
+        padding-inline: 10px;
+        border: 1px solid var(--pi-border-muted);
+        color: var(--pi-fg);
+        background: var(--pi-bg-elevated);
+      }
+      .pi-steps-toggle[aria-expanded="true"] {
+        border-color: var(--pi-accent);
+        color: var(--pi-accent);
+      }
+      .pi-step-strip .pi-filmstrip {
+        display: none;
+        position: absolute;
+        left: 0;
+        right: 0;
+        bottom: calc(100% + 6px);
+        max-width: 100%;
+        padding: 5px;
+        border: 1px solid var(--pi-border-muted);
+        border-radius: 14px;
+        background: color-mix(in srgb, var(--pi-bg-card) 96%, transparent);
+        box-shadow: 0 12px 38px var(--pi-shadow);
+        backdrop-filter: blur(18px);
+      }
+      #pi-panel.pi-steps-expanded .pi-step-strip .pi-filmstrip { display: flex; }
+      .pi-advanced-menu .pi-etch-toggle {
+        min-height: 34px;
+        margin-bottom: 8px;
+        justify-content: flex-start;
+      }
     }
 
     #pi-panel button:focus-visible,

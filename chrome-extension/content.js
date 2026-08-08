@@ -30,6 +30,7 @@
   let etchEnabled = false;
   let debugMode = false;
   let stepFilter = "all";
+  let stepsExpanded = false;
   let activeRecordId = null;
   let hovered = null;
   let hoverStack = [];
@@ -134,7 +135,8 @@
         <img class="pi-bubble-logo" src="${grinsekatzeIcon}" alt=""><span class="pi-bubble-count" id="pi-bubble-count">0</span>
       </button>
       <nav class="pi-step-strip" aria-label="Interaction steps">
-        <img class="pi-grinsekatze-icon" src="${grinsekatzeIcon}" alt="Grinsekatze">
+        <button class="pi-btn pi-btn-secondary pi-steps-toggle" id="pi-steps-toggle"
+          type="button" aria-expanded="false" aria-controls="pi-filmstrip">Steps</button>
         <div class="pi-filmstrip" id="pi-filmstrip" aria-label="Interaction steps">
           <button class="pi-step-filter active" id="pi-filter-all" data-step="all"
             aria-pressed="true">All steps</button>
@@ -144,6 +146,10 @@
         <details class="pi-advanced" id="pi-advanced">
           <summary role="button" aria-label="More options" title="More options">•••</summary>
           <div class="pi-advanced-menu">
+            <label class="pi-notes-toggle pi-etch-toggle">
+              <input type="checkbox" id="pi-etch-mode" aria-label="Etch"><span aria-hidden="true">Etch</span>
+              <span class="pi-etch-badge" id="pi-etch-count" style="display:none"></span>
+            </label>
             <label class="pi-notes-toggle" title="Include computed CSS, parent layout, and CSS variables">
               <input type="checkbox" id="pi-debug-mode"><span>Debug capture</span>
             </label>
@@ -156,10 +162,6 @@
       <div class="pi-composer" role="group" aria-label="Annotation composer">
         <textarea id="pi-context" rows="2" aria-label="General context"
           placeholder="General context (optional)..."></textarea>
-        <label class="pi-notes-toggle pi-etch-toggle">
-          <input type="checkbox" id="pi-etch-mode" aria-label="Etch"><span aria-hidden="true">Etch</span>
-          <span class="pi-etch-badge" id="pi-etch-count" style="display:none"></span>
-        </label>
         <div class="pi-composer-status">
           <span class="pi-capture-status" id="pi-capture-status" role="status" aria-live="polite"></span>
           <div class="pi-delivery-error" id="pi-delivery-error" role="alert" aria-live="assertive" hidden></div>
@@ -179,6 +181,10 @@
     byId("pi-submit")?.addEventListener("click", submit);
     byId("pi-undo")?.addEventListener("click", undoDelete);
     byId("pi-filter-all")?.addEventListener("click", () => setFilter("all"));
+    byId("pi-steps-toggle")?.addEventListener("click", () => {
+      stepsExpanded = !stepsExpanded;
+      render();
+    });
     byId("pi-context")?.addEventListener("input", (event) => {
       if (operation === "idle") draft.setContext(event.target.value);
     });
@@ -215,6 +221,7 @@
     etchEnabled = false;
     debugMode = false;
     stepFilter = "all";
+    stepsExpanded = false;
     activeRecordId = null;
     noteDrag = null;
     failedCapture = null;
@@ -654,7 +661,7 @@
     const busy = operation !== "idle";
     const snapshot = draft.snapshot();
     const draftMutationBlocked = busy || snapshot.capture !== null;
-    for (const id of ["pi-pause", "pi-submit", "pi-close", "pi-undo", "pi-help", "pi-minimize", "pi-context", "pi-etch-mode", "pi-debug-mode"]) {
+    for (const id of ["pi-pause", "pi-submit", "pi-close", "pi-undo", "pi-help", "pi-minimize", "pi-steps-toggle", "pi-context", "pi-etch-mode", "pi-debug-mode"]) {
       const control = byId(id);
       if (control) control.disabled = draftMutationBlocked;
     }
@@ -684,6 +691,8 @@
     advanced?.classList.toggle("pi-debug-enabled", debugMode);
     advanced?.querySelector?.("summary")?.setAttribute(
       "aria-label", debugMode ? "More options, Debug capture enabled" : "More options");
+    panelEl.classList.toggle("pi-steps-expanded", stepsExpanded);
+    byId("pi-steps-toggle")?.setAttribute("aria-expanded", String(stepsExpanded));
     panelEl.setAttribute("aria-busy", String(draftMutationBlocked));
     panelEl.querySelectorAll?.(".pi-step-filter").forEach((control) => { control.disabled = draftMutationBlocked; });
     notesEl?.querySelectorAll?.("button, textarea").forEach((control) => { control.disabled = draftMutationBlocked; });
@@ -1044,6 +1053,7 @@
   function setFilter(value) {
     if (operation !== "idle" || modal !== "none") return;
     stepFilter = value;
+    stepsExpanded = false;
     render();
   }
 

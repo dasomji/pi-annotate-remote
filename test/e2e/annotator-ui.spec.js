@@ -8,15 +8,13 @@ test("the annotator presents a filmstrip above a focused composer", async ({ wor
 
   await expect(steps).toBeVisible();
   await expect(composer).toBeVisible();
-  const icon = steps.getByRole("img", { name: "Grinsekatze" });
-  await expect(icon).toBeVisible();
-  expect(await icon.evaluate((image) => [image.naturalWidth, image.naturalHeight])).toEqual([64, 64]);
+  await expect(steps.getByRole("img", { name: "Grinsekatze" })).toHaveCount(0);
   await expect(steps.getByRole("button", { name: /All steps/ })).toHaveAttribute("aria-pressed", "true");
   await expect(steps.getByRole("button", { name: "Interact with page" })).toBeVisible();
   await expect(steps.getByRole("button", { name: "How to annotate" })).toBeVisible();
   await expect(composer.getByRole("textbox", { name: "General context" })).toHaveAttribute("rows", "2");
-  await expect(composer.getByRole("checkbox", { name: "Etch" })).toBeAttached();
-  await expect(composer.getByText("Etch", { exact: true })).toBeVisible();
+  await steps.getByRole("button", { name: "More options" }).click();
+  await expect(steps.getByRole("checkbox", { name: "Etch" })).toBeVisible();
   await expect(composer.getByRole("button", { name: "Submit" })).toBeVisible();
   await expect(page.getByRole("button", { name: "Cancel", exact: true })).toHaveCount(0);
   await expect(page.getByRole("button", { name: "Undo delete" })).toBeHidden();
@@ -105,6 +103,12 @@ test("bars, help, and Element annotation cards remain usable in a narrow short v
   await page.setViewportSize({ width: 320, height: 320 });
   await annotate(page, "#state-one", "Narrow viewport annotation");
 
+  const context = page.getByRole("textbox", { name: "General context" });
+  await context.fill("A long mobile note ".repeat(20));
+  expect(await context.evaluate((element) => element.scrollHeight > element.clientHeight)).toBe(true);
+  await context.evaluate((element) => { element.scrollTop = element.scrollHeight; });
+  expect(await context.evaluate((element) => element.scrollTop)).toBeGreaterThan(0);
+
   const viewport = page.viewportSize();
   const surfaces = [
     page.getByRole("navigation", { name: "Interaction steps" }),
@@ -132,6 +136,10 @@ test("bars, help, and Element annotation cards remain usable in a narrow short v
     });
   });
   await annotate(page, "#state-two", "Second narrow step");
+  const stepsButton = page.getByRole("button", { name: "Steps", exact: true });
+  await expect(stepsButton).toHaveAttribute("aria-expanded", "false");
+  await stepsButton.click();
+  await expect(stepsButton).toHaveAttribute("aria-expanded", "true");
   const secondStep = page.getByRole("button", { name: "Step 2, 1 element annotations" });
   await expect(secondStep).toHaveAttribute("aria-pressed", "true");
   await secondStep.focus();
