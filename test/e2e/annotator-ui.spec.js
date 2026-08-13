@@ -1,49 +1,37 @@
 import { test, expect } from "./fixtures/extension.js";
 import { annotate } from "./helpers/annotation.js";
 
-test("the annotator presents a filmstrip above a focused composer", async ({ workflow }) => {
+test("the annotator presents one composer with steps hidden in its menu", async ({ workflow }) => {
   const { page } = workflow;
-  const steps = page.getByRole("navigation", { name: "Interaction steps" });
   const composer = page.getByRole("group", { name: "Annotation composer" });
 
-  await expect(steps).toBeVisible();
   await expect(composer).toBeVisible();
-  const icon = steps.getByRole("img", { name: "Grinsekatze" });
-  await expect(icon).toBeVisible();
-  expect(await icon.evaluate((image) => [image.naturalWidth, image.naturalHeight])).toEqual([64, 64]);
-  await expect(steps.getByRole("button", { name: /All steps/ })).toHaveAttribute("aria-pressed", "true");
-  await expect(steps.getByRole("button", { name: "Interact with page" })).toBeVisible();
-  await expect(steps.getByRole("button", { name: "How to annotate" })).toBeVisible();
+  await expect(page.locator("#pi-panel img")).toHaveCount(0);
+  await expect(page.getByRole("navigation", { name: "Interaction steps" })).toHaveCount(0);
+  await expect(composer.getByRole("button", { name: "Interact with page" })).toBeVisible();
+  await expect(composer.getByRole("button", { name: "How to annotate" })).toBeVisible();
   await expect(composer.getByRole("textbox", { name: "General context" })).toHaveAttribute("rows", "2");
-  await expect(composer.getByRole("checkbox", { name: "Etch" })).toBeAttached();
-  await expect(composer.getByText("Etch", { exact: true })).toBeVisible();
+  await composer.getByRole("button", { name: "More options" }).click();
+  const steps = composer.getByRole("region", { name: "Interaction steps" });
+  await expect(steps.getByRole("button", { name: /All steps/ })).toHaveAttribute("aria-pressed", "true");
+  await expect(composer.getByRole("checkbox", { name: "Etch" })).toBeVisible();
   await expect(composer.getByRole("button", { name: "Submit" })).toBeVisible();
   await expect(page.getByRole("button", { name: "Cancel", exact: true })).toHaveCount(0);
   await expect(page.getByRole("button", { name: "Undo delete" })).toBeHidden();
-
-  const stripBounds = await steps.boundingBox();
-  const composerBounds = await composer.boundingBox();
-  expect(stripBounds.y + stripBounds.height).toBeLessThanOrEqual(composerBounds.y);
 });
 
-test("the step bar matches the composer width and scrolls only its filmstrip as steps accumulate", async ({ workflow }) => {
+test("the step filmstrip stays contained inside the menu as steps accumulate", async ({ workflow }) => {
   const { page } = workflow;
-  const steps = page.getByRole("navigation", { name: "Interaction steps" });
   const composer = page.getByRole("group", { name: "Annotation composer" });
+  await composer.getByRole("button", { name: "More options" }).click();
+  const steps = composer.getByRole("region", { name: "Interaction steps" });
   const filmstrip = page.locator(".pi-filmstrip");
-  const initialStepBounds = await steps.boundingBox();
-  const composerBounds = await composer.boundingBox();
-
-  expect(Math.abs(initialStepBounds.width - composerBounds.width)).toBeLessThan(1);
   await annotate(page, "#state-one", "Step one");
   for (let step = 2; step <= 7; step += 1) {
     await page.getByRole("button", { name: "Interact with page" }).click();
     await page.getByRole("button", { name: "Resume annotation" }).click();
     await annotate(page, "#state-one", `Step ${step}`);
   }
-
-  const finalStepBounds = await steps.boundingBox();
-  expect(Math.abs(finalStepBounds.width - initialStepBounds.width)).toBeLessThan(1);
   expect(await filmstrip.evaluate((element) => element.scrollWidth > element.clientWidth)).toBe(true);
   expect(await steps.evaluate((element) => element.scrollWidth <= element.clientWidth)).toBe(true);
 });
@@ -105,9 +93,25 @@ test("bars, help, and Element annotation cards remain usable in a narrow short v
   await page.setViewportSize({ width: 320, height: 320 });
   await annotate(page, "#state-one", "Narrow viewport annotation");
 
+  const note = page.locator(".pi-note-card");
+  const textareaBox = await note.locator(".pi-note-textarea").boundingBox();
+  const sendBox = await note.getByRole("button", { name: "Send comment" }).boundingBox();
+  expect(sendBox.x).toBeGreaterThanOrEqual(textareaBox.x + textareaBox.width);
+  await expect(note.locator(".pi-note-body > .pi-note-selector")).toHaveText("#state-one");
+  for (const control of await note.locator(".pi-note-header button").all()) {
+    const box = await control.boundingBox();
+    expect(box.width).toBeGreaterThanOrEqual(32);
+    expect(box.height).toBeGreaterThanOrEqual(32);
+  }
+
+  const context = page.getByRole("textbox", { name: "General context" });
+  await context.fill("A long mobile note ".repeat(20));
+  expect(await context.evaluate((element) => element.scrollHeight > element.clientHeight)).toBe(true);
+  await context.evaluate((element) => { element.scrollTop = element.scrollHeight; });
+  expect(await context.evaluate((element) => element.scrollTop)).toBeGreaterThan(0);
+
   const viewport = page.viewportSize();
   const surfaces = [
-    page.getByRole("navigation", { name: "Interaction steps" }),
     page.getByRole("group", { name: "Annotation composer" }),
     page.locator(".pi-note-card"),
   ];
@@ -120,8 +124,8 @@ test("bars, help, and Element annotation cards remain usable in a narrow short v
   }
 
   const card = await page.locator(".pi-note-card").boundingBox();
-  const strip = await page.getByRole("navigation", { name: "Interaction steps" }).boundingBox();
-  expect(card.y + card.height).toBeLessThanOrEqual(strip.y);
+  const composerBox = await page.getByRole("group", { name: "Annotation composer" }).boundingBox();
+  expect(card.y + card.height).toBeLessThanOrEqual(composerBox.y);
 
   await page.getByRole("button", { name: "Interact with page" }).click();
   await page.locator("#open-transient").click();
@@ -132,7 +136,9 @@ test("bars, help, and Element annotation cards remain usable in a narrow short v
     });
   });
   await annotate(page, "#state-two", "Second narrow step");
+  await page.getByRole("button", { name: "More options" }).click();
   const secondStep = page.getByRole("button", { name: "Step 2, 1 element annotations" });
+  await secondStep.click();
   await expect(secondStep).toHaveAttribute("aria-pressed", "true");
   await secondStep.focus();
   await expect(secondStep).toBeFocused();

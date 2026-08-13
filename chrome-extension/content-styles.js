@@ -20,25 +20,25 @@
        CSS Custom Properties (aligned with pi interview theme)
        ═══════════════════════════════════════════════════════════════════ */
     :root {
-      --pi-bg-body: #18181e;
-      --pi-bg-card: #1e1e24;
-      --pi-bg-elevated: #252530;
-      --pi-bg-selected: #3a3a4a;
-      --pi-bg-hover: #2b2b37;
-      --pi-fg: #e0e0e0;
-      --pi-fg-muted: #808080;
-      --pi-fg-dim: #666666;
-      --pi-accent: #8abeb7;
-      --pi-accent-hover: #9dcec7;
-      --pi-accent-muted: rgba(138, 190, 183, 0.15);
-      --pi-border: #5f87ff;
-      --pi-border-muted: #505050;
-      --pi-border-focus: #7a7a8a;
-      --pi-success: #b5bd68;
-      --pi-warning: #f0c674;
-      --pi-error: #cc6666;
-      --pi-focus-ring: rgba(95, 135, 255, 0.2);
-      --pi-shadow: rgba(0, 0, 0, 0.5);
+      --pi-bg-body: #171717;
+      --pi-bg-card: #212121;
+      --pi-bg-elevated: #2f2f2f;
+      --pi-bg-selected: #424242;
+      --pi-bg-hover: #383838;
+      --pi-fg: #ececec;
+      --pi-fg-muted: #b4b4b4;
+      --pi-fg-dim: #8f8f8f;
+      --pi-accent: #10a37f;
+      --pi-accent-hover: #0d8f70;
+      --pi-accent-muted: rgba(16, 163, 127, 0.14);
+      --pi-border: #10a37f;
+      --pi-border-muted: #4a4a4a;
+      --pi-border-focus: #696969;
+      --pi-success: #10a37f;
+      --pi-warning: #f2c94c;
+      --pi-error: #ef6b6b;
+      --pi-focus-ring: rgba(16, 163, 127, 0.18);
+      --pi-shadow: rgba(0, 0, 0, 0.34);
       --pi-font-mono: ui-monospace, "Cascadia Code", "Source Code Pro", Menlo, Consolas, monospace;
       --pi-font-ui: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
       --pi-radius: 4px;
@@ -47,25 +47,25 @@
     /* Light theme */
     @media (prefers-color-scheme: light) {
       :root {
-        --pi-bg-body: #f8f8f8;
+        --pi-bg-body: #f7f7f8;
         --pi-bg-card: #ffffff;
-        --pi-bg-elevated: #f0f0f0;
-        --pi-bg-selected: #d0d0e0;
-        --pi-bg-hover: #e8e8e8;
-        --pi-fg: #1a1a1a;
-        --pi-fg-muted: #6c6c6c;
+        --pi-bg-elevated: #f2f2f2;
+        --pi-bg-selected: #e7e7e7;
+        --pi-bg-hover: #ececec;
+        --pi-fg: #0d0d0d;
+        --pi-fg-muted: #5d5d5d;
         --pi-fg-dim: #8a8a8a;
-        --pi-accent: #5f8787;
-        --pi-accent-hover: #4a7272;
-        --pi-accent-muted: rgba(95, 135, 135, 0.15);
-        --pi-border: #5f87af;
-        --pi-border-muted: #b0b0b0;
-        --pi-border-focus: #8a8a9a;
-        --pi-success: #87af87;
+        --pi-accent: #10a37f;
+        --pi-accent-hover: #0d8f70;
+        --pi-accent-muted: rgba(16, 163, 127, 0.10);
+        --pi-border: #10a37f;
+        --pi-border-muted: #dedede;
+        --pi-border-focus: #b7b7b7;
+        --pi-success: #10a37f;
         --pi-warning: #d7af5f;
         --pi-error: #af5f5f;
-        --pi-focus-ring: rgba(95, 135, 175, 0.2);
-        --pi-shadow: rgba(0, 0, 0, 0.15);
+        --pi-focus-ring: rgba(16, 163, 127, 0.16);
+        --pi-shadow: rgba(0, 0, 0, 0.14);
       }
 
       .pi-etch-toggle.recording {
@@ -131,12 +131,13 @@
     .pi-marker-badge {
       position: fixed;
       pointer-events: auto;
-      background: var(--pi-accent);
-      color: var(--pi-bg-body);
-      width: auto;
-      min-width: 28px;
-      height: 28px;
-      padding: 0 6px;
+      background: var(--pi-fg);
+      color: var(--pi-bg-card);
+      width: 34px;
+      min-width: 34px;
+      height: 34px;
+      padding: 0;
+      aspect-ratio: 1;
       border-radius: 50%;
       display: flex;
       align-items: center;
@@ -150,11 +151,13 @@
 
     .pi-marker-badge:hover {
       transform: translate(-50%, -50%) scale(1.1);
-      background: var(--pi-accent-hover);
+      background: var(--pi-fg-muted);
     }
 
     .pi-marker-badge.open {
-      background: var(--pi-success);
+      background: var(--pi-fg);
+      color: var(--pi-bg-card);
+      box-shadow: 0 0 0 3px var(--pi-bg-card), 0 0 0 4px var(--pi-border-focus);
     }
 
     /* ═══════════════════════════════════════════════════════════════════
@@ -230,8 +233,8 @@
       max-height: calc(100vh - 32px);
       background: var(--pi-bg-card);
       border: 1px solid var(--pi-border-muted);
-      border-radius: 8px;
-      box-shadow: 0 4px 24px var(--pi-shadow);
+      border-radius: 18px;
+      box-shadow: 0 12px 36px var(--pi-shadow);
       pointer-events: auto;
       font-family: var(--pi-font-ui);
       overflow: hidden;
@@ -251,17 +254,18 @@
     .pi-note-header {
       display: flex;
       align-items: center;
+      justify-content: flex-end;
       gap: 8px;
       padding: 8px 10px;
-      background: var(--pi-bg-elevated);
+      background: var(--pi-bg-card);
       border-bottom: 1px solid var(--pi-border-muted);
       cursor: grab;
       flex-shrink: 0;
     }
 
     .pi-note-badge {
-      background: var(--pi-accent);
-      color: var(--pi-bg-body);
+      background: var(--pi-fg);
+      color: var(--pi-bg-card);
       width: 22px;
       height: 22px;
       border-radius: 50%;
@@ -273,13 +277,14 @@
     }
 
     .pi-note-selector {
-      flex: 1;
+      display: block;
+      width: 100%;
+      margin-bottom: 7px;
       font: 12px var(--pi-font-mono);
       color: var(--pi-fg-muted);
       overflow: hidden;
       text-overflow: ellipsis;
       white-space: nowrap;
-      cursor: pointer;
     }
 
     .pi-note-selector:hover {
@@ -296,7 +301,9 @@
       color: var(--pi-fg-dim);
       font-size: 14px;
       cursor: pointer;
-      padding: 2px 4px;
+      width: 32px;
+      height: 32px;
+      padding: 0;
       border-radius: var(--pi-radius);
       transition: all 0.15s;
     }
@@ -305,6 +312,11 @@
     .pi-note-contract { font-size: 11px; }
     .pi-note-expand:hover,
     .pi-note-contract:hover { background: var(--pi-bg-elevated); color: var(--pi-fg-muted); }
+    .pi-note-expand:disabled,
+    .pi-note-contract:disabled {
+      opacity: 0.32;
+      cursor: not-allowed;
+    }
     .pi-note-screenshot { opacity: 0.4; }
     .pi-note-screenshot:hover { background: var(--pi-bg-elevated); opacity: 0.7; }
     .pi-note-screenshot.active { opacity: 1; background: var(--pi-accent-muted); }
@@ -316,8 +328,15 @@
       overflow: auto;
     }
 
+    .pi-note-comment-row {
+      display: flex;
+      align-items: stretch;
+      gap: 8px;
+    }
+
     .pi-note-textarea {
-      width: 100%;
+      flex: 1 1 auto;
+      min-width: 0;
       background: var(--pi-bg-body);
       border: 1px solid var(--pi-border-muted);
       border-radius: 6px;
@@ -340,18 +359,16 @@
       color: var(--pi-fg-dim);
     }
 
-    .pi-note-actions {
-      display: flex;
-      justify-content: flex-end;
-      margin-top: 8px;
-    }
-
     .pi-note-send {
+      flex: none;
       padding: 6px 12px;
       border: 0;
-      border-radius: 6px;
-      background: var(--pi-accent);
-      color: var(--pi-bg-body);
+      width: 34px;
+      height: 34px;
+      padding: 0;
+      border-radius: 50%;
+      background: var(--pi-fg);
+      color: var(--pi-bg-card);
       cursor: pointer;
       font: 600 12px var(--pi-font-ui);
     }
@@ -411,7 +428,6 @@
     }
 
     #pi-panel.pi-minimized .pi-minimized-bubble { display: flex; }
-    .pi-bubble-logo { font-size: 20px; font-weight: 700; line-height: 20px; }
     .pi-bubble-count { color: var(--pi-fg-muted); font-size: 10px; line-height: 12px; }
 
     .pi-header {
@@ -831,38 +847,18 @@
 
     #pi-panel > * { pointer-events: auto; }
 
-    .pi-step-strip,
     .pi-composer {
-      width: min(760px, calc(100vw - 32px));
+      width: min(690px, calc(100vw - 32px));
       border: 1px solid var(--pi-border-muted);
       background: color-mix(in srgb, var(--pi-bg-card) 94%, transparent);
       color: var(--pi-fg);
-      box-shadow: 0 12px 38px var(--pi-shadow);
-      backdrop-filter: blur(18px);
-    }
-
-    .pi-step-strip {
-      display: flex;
-      align-items: center;
-      gap: 6px;
-      min-width: 0;
-      padding: 6px;
-      border-radius: 16px;
-    }
-
-    .pi-grinsekatze-icon {
-      display: block;
-      flex: none;
-      width: 34px;
-      height: 34px;
-      border: 1px solid var(--pi-border-muted);
-      border-radius: 9px;
-      background: #fcfaf5;
+      box-shadow: 0 10px 34px var(--pi-shadow);
+      backdrop-filter: blur(20px);
     }
 
     .pi-filmstrip {
-      flex: 1 1 auto;
-      min-width: 72px;
+      width: 100%;
+      min-width: 0;
       overflow-x: auto;
       overscroll-behavior-x: contain;
       scrollbar-width: thin;
@@ -870,7 +866,14 @@
 
     .pi-step-filter {
       min-height: 44px;
-      border-radius: 10px;
+      border-radius: 14px;
+    }
+
+    .pi-step-filter.active {
+      border-color: var(--pi-border-focus);
+      background: var(--pi-bg-selected);
+      color: var(--pi-fg);
+      box-shadow: none;
     }
 
     .pi-step-filter > span:not(.pi-step-thumbnail, .pi-step-hidden) {
@@ -914,7 +917,7 @@
       position: absolute;
       right: 0;
       bottom: calc(100% + 10px);
-      min-width: 170px;
+      width: min(420px, calc(100vw - 32px));
       padding: 10px 12px;
       border: 1px solid var(--pi-border-muted);
       border-radius: 10px;
@@ -923,32 +926,90 @@
     }
 
     .pi-composer {
+      position: relative;
       display: flex;
-      align-items: stretch;
+      align-items: center;
+      gap: 14px;
+      min-height: 104px;
+      padding: 11px 12px 11px 16px;
+      border-radius: 22px;
+    }
+
+    .pi-composer-actions {
+      display: grid;
+      flex: none;
+      align-self: stretch;
+      align-content: center;
       gap: 7px;
-      min-height: 66px;
-      padding: 7px;
-      border-radius: 16px;
+    }
+
+    .pi-utility-controls,
+    .pi-primary-actions {
+      display: flex;
+      align-items: center;
+      justify-content: flex-end;
+      gap: 5px;
+    }
+
+    .pi-utility-controls .pi-icon-button,
+    .pi-utility-controls .pi-advanced > summary {
+      width: 30px;
+      height: 30px;
+      border-radius: 9px;
+    }
+
+    .pi-primary-actions .pi-btn {
+      min-width: 88px;
+      min-height: 38px;
+      padding: 8px 15px;
+      border: 0;
+      border-radius: 11px;
+      background: var(--pi-fg);
+      color: var(--pi-bg-card);
+      font-weight: 650;
+    }
+
+    .pi-primary-actions .pi-btn:hover:not(:disabled) {
+      border: 0;
+      background: var(--pi-fg-muted);
+      color: var(--pi-bg-card);
+    }
+
+    .pi-advanced-steps {
+      display: grid;
+      gap: 7px;
+      margin-bottom: 10px;
+      padding-bottom: 10px;
+      border-bottom: 1px solid var(--pi-border-muted);
+    }
+
+    .pi-advanced-heading {
+      color: var(--pi-fg-muted);
+      font: 650 11px var(--pi-font-ui);
     }
 
     .pi-composer textarea {
       min-width: 80px;
       flex: 1 1 auto;
-      height: 50px;
+      height: 62px;
       resize: none;
-      padding: 7px 9px;
+      padding: 11px 4px;
       border: 1px solid transparent;
-      border-radius: 9px;
+      border-radius: 10px;
       background: transparent;
       color: var(--pi-fg);
-      font: 12px/18px var(--pi-font-ui);
+      font: 14px/20px var(--pi-font-ui);
+      overflow-y: auto;
+      overscroll-behavior: contain;
+      touch-action: pan-y;
+      -webkit-overflow-scrolling: touch;
     }
 
     .pi-composer textarea:focus {
       outline: none;
-      border-color: var(--pi-accent);
-      box-shadow: 0 0 0 3px var(--pi-focus-ring);
-      background: var(--pi-bg-body);
+      border-color: transparent;
+      box-shadow: none;
+      background: transparent;
     }
 
     .pi-composer-status {
@@ -963,13 +1024,21 @@
       display: none;
     }
     .pi-delivery-error { max-width: 180px; }
-    .pi-composer .pi-btn-submit { min-width: 96px; border-radius: 10px; }
-    .pi-composer .pi-etch-toggle {
+    .pi-composer .pi-btn-submit {
+      min-width: 88px;
+      min-height: 38px;
+      border-radius: 11px;
+      background: var(--pi-fg);
+      color: var(--pi-bg-card);
+      font-weight: 650;
+    }
+    .pi-composer .pi-btn-submit:hover:not(:disabled) { background: var(--pi-fg-muted); }
+    .pi-advanced-menu .pi-etch-toggle {
       position: relative;
-      flex: none;
-      align-self: stretch;
       justify-content: center;
-      min-width: 68px;
+      min-height: 34px;
+      width: 100%;
+      margin-bottom: 8px;
       border-radius: 10px;
     }
 
@@ -1009,8 +1078,6 @@
       box-shadow: 0 4px 24px var(--pi-shadow);
     }
 
-    .pi-bubble-logo { width: 30px; height: 30px; border-radius: 8px; }
-
     .pi-help-dialog {
       box-sizing: border-box;
       max-height: calc(100vh - 40px);
@@ -1044,24 +1111,61 @@
 
     @media (max-width: 640px) {
       #pi-panel { left: 8px; right: 8px; bottom: 8px; gap: 6px; }
-      .pi-step-strip,
       .pi-composer { width: calc(100vw - 16px); }
-      .pi-grinsekatze-icon { width: 30px; height: 30px; }
-      .pi-step-strip { gap: 4px; padding: 5px; }
-      .pi-step-strip .pi-filmstrip { min-width: 0; }
       .pi-btn-pause { padding-inline: 8px; }
-      .pi-composer { min-height: 58px; padding: 5px; }
-      .pi-composer textarea { height: 46px; padding-inline: 6px; }
-      .pi-composer .pi-etch-toggle { min-width: 52px; padding-inline: 6px; }
-      .pi-composer .pi-btn-submit { min-width: 72px; padding-inline: 8px; }
-      .pi-composer { flex-wrap: wrap; }
+      .pi-composer {
+        display: grid;
+        grid-template-columns: minmax(0, 1fr);
+        grid-template-rows: auto auto auto auto;
+        min-height: 0;
+        padding: 10px;
+        gap: 7px;
+        border-radius: 18px;
+      }
+      .pi-composer textarea {
+        grid-row: 2;
+        width: 100%;
+        min-width: 0;
+        height: 66px;
+        padding: 9px 7px;
+        border-radius: 9px;
+      }
+      .pi-primary-actions .pi-btn,
+      .pi-composer .pi-btn-submit { min-width: 82px; padding-inline: 12px; }
       .pi-composer-status {
-        order: 2;
-        flex: 1 0 100%;
+        grid-row: 3;
+        width: 100%;
         max-width: none;
         padding: 2px 6px 4px;
       }
       .pi-composer-status .pi-delivery-error { max-width: none; }
+      .pi-composer-actions {
+        display: contents;
+      }
+      .pi-utility-controls {
+        grid-row: 1;
+        width: 100%;
+        justify-content: flex-end;
+      }
+      .pi-primary-actions {
+        grid-row: 4;
+        width: min(260px, 100%);
+        margin-inline: auto;
+        justify-content: space-around;
+      }
+      .pi-advanced-menu {
+        position: absolute;
+        left: 10px;
+        right: 10px;
+        bottom: calc(100% + 8px);
+        width: auto;
+        border-radius: 14px;
+      }
+      .pi-advanced { position: static; }
+    }
+
+    @media (max-width: 820px) and (orientation: portrait) {
+      .pi-advanced-menu .pi-etch-toggle { justify-content: flex-start; }
     }
 
     #pi-panel button:focus-visible,

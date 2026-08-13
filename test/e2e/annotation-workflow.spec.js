@@ -1,6 +1,11 @@
 import { test, expect } from "./fixtures/extension.js";
 import { annotate, submitAnnotation as submit } from "./helpers/annotation.js";
 
+async function enableEtch(page) {
+  await page.getByRole("button", { name: "More options" }).click();
+  await page.getByRole("checkbox", { name: "Etch" }).check();
+}
+
 test("delivers an atomic schema-v2 screenshot capture through the broker", async ({ workflow }) => {
   const { page, server, captureControl } = workflow;
   await captureControl.configure({ delayMs: 450 });
@@ -43,12 +48,13 @@ test("delivers an atomic schema-v2 screenshot capture through the broker", async
 test("pause and resume return input to the page without creating empty or reordered steps", async ({ workflow }) => {
   const { page, server } = workflow;
 
-  await annotate(page, "#state-one", "First state");
+  const firstNote = await annotate(page, "#state-one", "First state");
+  await firstNote.getByRole("button", { name: "Send comment" }).click();
+  await page.waitForFunction(() => !document.querySelector("#pi-panel")?.classList.contains("pi-busy"));
   await page.getByRole("button", { name: "Interact with page" }).click();
 
   const resume = page.getByRole("button", { name: "Resume annotation" });
   await expect(resume).toBeVisible();
-  await expect(page.getByRole("navigation", { name: "Interaction steps" })).toBeHidden();
   await expect(page.getByRole("group", { name: "Annotation composer" })).toBeHidden();
   await expect(page.locator("#pi-markers")).toBeHidden();
   await expect(page.locator(".pi-notes-container")).toBeHidden();
@@ -58,7 +64,9 @@ test("pause and resume return input to the page without creating empty or reorde
 
   await resume.click();
   await expect(page.getByRole("button", { name: "Interact with page" })).toBeVisible();
-  await annotate(page, "#state-two", "Second transient state");
+  const secondNote = await annotate(page, "#state-two", "Second transient state");
+  await secondNote.getByRole("button", { name: "Send comment" }).click();
+  await page.waitForFunction(() => !document.querySelector("#pi-panel")?.classList.contains("pi-busy"));
 
   // A bare pause/resume boundary must not append an empty third step.
   await page.getByRole("button", { name: "Interact with page" }).click();
@@ -94,7 +102,7 @@ test("enabled Etch starts a fresh recording period after delivery failure", asyn
   const { page, server } = workflow;
   server.state.failDeliveries = 1;
   await page.locator("#pi-context").fill("Retry Etch recording");
-  await page.locator("label.pi-etch-toggle").click();
+  await enableEtch(page);
   await page.locator("#state-one").evaluate((element) => {
     element.style.color = "rgb(200, 0, 0)";
   });
@@ -121,7 +129,7 @@ test("enabled Etch starts a fresh recording period after delivery failure", asyn
 test("submit delivers an Etch finalization warning when its screenshot fails", async ({ workflow }) => {
   const { page, server, captureControl } = workflow;
   await page.locator("#pi-context").fill("Etch warning delivery");
-  await page.locator("label.pi-etch-toggle").click();
+  await enableEtch(page);
   await expect(page.locator("#pi-etch-mode")).toBeChecked();
   await page.locator("#state-one").evaluate((element) => {
     element.style.color = "rgb(200, 0, 0)";
@@ -159,7 +167,7 @@ test("Pause and Resume expose keyboard-operable, mode-specific controls with vis
 test("Etch records ordered annotation periods but excludes the paused mutation period", async ({ workflow }) => {
   const { page, server } = workflow;
   await page.locator("#pi-context").fill("Etch period acceptance");
-  await page.locator("label.pi-etch-toggle").click();
+  await enableEtch(page);
   await expect(page.locator("#pi-etch-mode")).toBeChecked();
 
   await page.locator("#state-one").evaluate((element) => {

@@ -120,51 +120,55 @@
   }
 
   function createPanel() {
-    const grinsekatzeIcon = chrome.runtime.getURL?.("assets/grinsekatze.svg") ||
-      "assets/grinsekatze.svg";
     panelEl = document.createElement("div");
     panelEl.id = "pi-panel";
     panelEl.innerHTML = `
       <button class="pi-resume-bubble" id="pi-resume-bubble" type="button"
         aria-label="Resume annotation" title="Resume annotation">
-        <img class="pi-bubble-logo" src="${grinsekatzeIcon}" alt=""><span>Resume</span>
+        <span>Resume</span>
       </button>
       <button class="pi-minimized-bubble" id="pi-minimized-bubble" type="button"
         aria-label="Restore annotation bar" title="Restore annotation bar">
-        <img class="pi-bubble-logo" src="${grinsekatzeIcon}" alt=""><span class="pi-bubble-count" id="pi-bubble-count">0</span>
+        <span class="pi-bubble-count" id="pi-bubble-count">0</span>
       </button>
-      <nav class="pi-step-strip" aria-label="Interaction steps">
-        <img class="pi-grinsekatze-icon" src="${grinsekatzeIcon}" alt="Grinsekatze">
-        <div class="pi-filmstrip" id="pi-filmstrip" aria-label="Interaction steps">
-          <button class="pi-step-filter active" id="pi-filter-all" data-step="all"
-            aria-pressed="true">All steps</button>
-        </div>
-        <button class="pi-btn pi-btn-pause" id="pi-pause">Interact with page</button>
-        <button class="pi-btn pi-btn-secondary" id="pi-undo" hidden>Undo delete</button>
-        <details class="pi-advanced" id="pi-advanced">
-          <summary role="button" aria-label="More options" title="More options">•••</summary>
-          <div class="pi-advanced-menu">
-            <label class="pi-notes-toggle" title="Include computed CSS, parent layout, and CSS variables">
-              <input type="checkbox" id="pi-debug-mode"><span>Debug capture</span>
-            </label>
-          </div>
-        </details>
-        <button class="pi-icon-button pi-help" id="pi-help" aria-label="How to annotate" title="How to annotate">?</button>
-        <button class="pi-icon-button pi-minimize" id="pi-minimize" aria-label="Minimize annotation bar" title="Minimize">−</button>
-        <button class="pi-icon-button pi-close" id="pi-close" aria-label="Cancel annotation" title="Close">×</button>
-      </nav>
       <div class="pi-composer" role="group" aria-label="Annotation composer">
         <textarea id="pi-context" rows="2" aria-label="General context"
-          placeholder="General context (optional)..."></textarea>
-        <label class="pi-notes-toggle pi-etch-toggle">
-          <input type="checkbox" id="pi-etch-mode" aria-label="Etch"><span aria-hidden="true">Etch</span>
-          <span class="pi-etch-badge" id="pi-etch-count" style="display:none"></span>
-        </label>
+          placeholder="What should change? (optional)"></textarea>
         <div class="pi-composer-status">
           <span class="pi-capture-status" id="pi-capture-status" role="status" aria-live="polite"></span>
           <div class="pi-delivery-error" id="pi-delivery-error" role="alert" aria-live="assertive" hidden></div>
         </div>
-        <button class="pi-btn pi-btn-submit" id="pi-submit">Submit</button>
+        <div class="pi-composer-actions">
+          <div class="pi-utility-controls">
+            <button class="pi-btn pi-btn-secondary" id="pi-undo" hidden>Undo delete</button>
+            <details class="pi-advanced" id="pi-advanced">
+              <summary role="button" aria-label="More options" title="More options">•••</summary>
+              <div class="pi-advanced-menu">
+                <section class="pi-advanced-steps" aria-label="Interaction steps">
+                  <span class="pi-advanced-heading">Steps</span>
+                  <div class="pi-filmstrip" id="pi-filmstrip">
+                    <button class="pi-step-filter active" id="pi-filter-all" data-step="all"
+                      aria-pressed="true">All steps</button>
+                  </div>
+                </section>
+                <label class="pi-notes-toggle pi-etch-toggle">
+                  <input type="checkbox" id="pi-etch-mode" aria-label="Etch"><span aria-hidden="true">Etch</span>
+                  <span class="pi-etch-badge" id="pi-etch-count" style="display:none"></span>
+                </label>
+                <label class="pi-notes-toggle" title="Include computed CSS, parent layout, and CSS variables">
+                  <input type="checkbox" id="pi-debug-mode"><span>Debug capture</span>
+                </label>
+              </div>
+            </details>
+            <button class="pi-icon-button pi-help" id="pi-help" aria-label="How to annotate" title="How to annotate">?</button>
+            <button class="pi-icon-button pi-minimize" id="pi-minimize" aria-label="Minimize annotation bar" title="Minimize">−</button>
+            <button class="pi-icon-button pi-close" id="pi-close" aria-label="Cancel annotation" title="Close">×</button>
+          </div>
+          <div class="pi-primary-actions">
+            <button class="pi-btn pi-btn-pause" id="pi-pause" aria-label="Interact with page">Interact</button>
+            <button class="pi-btn pi-btn-submit" id="pi-submit">Submit</button>
+          </div>
+        </div>
       </div>`;
     document.body.appendChild(panelEl);
 
@@ -855,16 +859,16 @@
     card.dataset.annotationId = id;
     card.innerHTML = `
       <div class="pi-note-header">
-        <span class="pi-note-selector">${inspect.escapeHtml(element.metadata.selector)}</span>
         <span class="pi-historical" role="status"></span>
         <button class="pi-note-expand" aria-label="Move Element annotation to parent">▲</button>
         <button class="pi-note-contract" aria-label="Move Element annotation toward original element">▼</button>
         <button class="pi-note-close" aria-label="Delete element annotation">×</button>
       </div>
       <div class="pi-note-body">
-        <textarea class="pi-note-textarea" placeholder="Describe changes for this element...">${inspect.escapeHtml(element.comment)}</textarea>
-        <div class="pi-note-actions">
-          <button class="pi-note-send" type="button" aria-label="Send comment">Send</button>
+        <span class="pi-note-selector">${inspect.escapeHtml(element.metadata.selector)}</span>
+        <div class="pi-note-comment-row">
+          <textarea class="pi-note-textarea" placeholder="Describe changes for this element...">${inspect.escapeHtml(element.comment)}</textarea>
+          <button class="pi-note-send" type="button" aria-label="Send comment">↑</button>
         </div>
       </div>`;
     const source = record?.sourceNode;
@@ -956,8 +960,13 @@
     const parent = sourceAvailable ? record.sourceNode.parentElement : null;
     const canMoveUp = parent && parent !== document.body && parent !== document.documentElement &&
       !inspect.isPiElement(parent);
-    const canMoveDown = record.navigation.index > 0 &&
-      record.navigation.path[record.navigation.index - 1]?.isConnected !== false;
+    const retracedChild = record.navigation.index > 0
+      ? record.navigation.path[record.navigation.index - 1]
+      : null;
+    const onlyChild = record.navigation.index === 0
+      ? uniqueNavigableChild(record.sourceNode)
+      : null;
+    const canMoveDown = retracedChild?.isConnected !== false && Boolean(retracedChild) || Boolean(onlyChild);
     const closedReason = "Element cannot be changed after its interaction step is closed";
     const unavailableReason = "The current source element is no longer available";
     const busyReason = "Wait for the current annotation operation to finish";
@@ -976,6 +985,12 @@
       "Move Element annotation toward original element";
   }
 
+  function uniqueNavigableChild(source) {
+    if (!source?.children) return null;
+    const children = Array.from(source.children).filter((child) => !inspect.isPiElement(child));
+    return children.length === 1 ? children[0] : null;
+  }
+
   function moveElementTarget(id, direction) {
     if (operation !== "idle" || modal !== "none" || !draft.canRetarget(id)) return;
     const record = records.get(id);
@@ -992,9 +1007,16 @@
       targetIndex = record.navigation.index + 1;
       truncate = true;
     } else {
-      targetIndex = record.navigation.index - 1;
-      target = record.navigation.path[targetIndex];
-      if (targetIndex < 0 || !target || target.isConnected === false) return;
+      if (record.navigation.index === 0) {
+        target = uniqueNavigableChild(record.sourceNode);
+        if (!target || target.isConnected === false) return;
+        record.navigation.path.unshift(target);
+        targetIndex = 0;
+      } else {
+        targetIndex = record.navigation.index - 1;
+        target = record.navigation.path[targetIndex];
+        if (!target || target.isConnected === false) return;
+      }
     }
 
     const result = draft.retargetElement({

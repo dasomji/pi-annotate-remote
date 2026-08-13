@@ -11,6 +11,11 @@ async function createSecondStep(page) {
   return annotate(page, "#state-two", "Second-step annotation");
 }
 
+async function openStepMenu(page) {
+  const allSteps = page.getByRole("button", { name: /^All steps/ });
+  if (!await allSteps.isVisible()) await page.getByRole("button", { name: /^More options/ }).click();
+}
+
 async function expectCurrentTargetOutline(page, targetSelector) {
   const outline = page.getByLabel("Current Element annotation target");
   await expect(outline).toBeVisible();
@@ -76,6 +81,25 @@ test("Element annotation arrows retrace the exact DOM branch and deliver the ret
   expect(element.comment).toBe("Keep this comment while retargeting");
   expect(element.metadata).toMatchObject({ selector: "main", tag: "main" });
   expect(element.cropImage.status).toBe("captured");
+});
+
+test("DOM down navigation only descends from the selected element when it has one child", async ({ workflow }) => {
+  const { page } = workflow;
+  await page.locator("#state-one").evaluate((element) => {
+    element.insertAdjacentHTML("beforebegin", '<div id="unique-parent"><span id="only-child">Only child</span></div>');
+  });
+  const focusedNote = await annotate(page, "#unique-parent", "Descend through an unambiguous branch");
+  const annotationId = await focusedNote.getAttribute("data-annotation-id");
+  const note = page.locator(`[data-annotation-id="${annotationId}"]`);
+  const moveDown = note.getByRole("button", {
+    name: "Move Element annotation toward original element",
+  });
+
+  await expect(moveDown).toBeEnabled();
+  await moveDown.click();
+  await expect(note.locator(".pi-note-selector")).toHaveText("#only-child");
+  await expect(moveDown).toBeDisabled();
+  await expect(note.getByRole("button", { name: "Move Element annotation to parent" })).toBeEnabled();
 });
 
 test("DOM navigation stays visually stable and defers screenshot capture until Send", async ({ workflow }) => {
@@ -261,6 +285,7 @@ test("marker numbers remain anchored to their interaction step while other steps
   await annotate(page, "#state-one", "First comment in step one");
   await annotate(page, "#mutate", "Second comment in step one");
   await createSecondStep(page);
+  await openStepMenu(page);
 
   const markers = page.locator("#pi-markers .pi-marker-badge");
   await expect(markers).toHaveText(["2.1"]);
@@ -276,6 +301,7 @@ test("marker numbers remain anchored to their interaction step while other steps
 test("step filtering defaults to the current step and preserves other evidence", async ({ workflow }) => {
   const { page } = workflow;
   await annotate(page, "#state-one", "First-step annotation");
+  await openStepMenu(page);
 
   const stepButtons = page.locator("#pi-filmstrip .pi-step-filter[data-step]:not([data-step='all'])");
   await expect(stepButtons).toHaveCount(1);
@@ -344,6 +370,7 @@ test("a historical annotation remains visible after filtering away and back", as
   await createSecondStep(page);
   await page.locator("#state-one").evaluate((source) => source.remove());
   await page.evaluate(() => window.dispatchEvent(new Event("resize")));
+  await openStepMenu(page);
 
   const stepButtons = page.locator("#pi-filmstrip .pi-step-filter[data-step]:not([data-step='all'])");
   await stepButtons.nth(1).click();
@@ -361,10 +388,13 @@ test("deleting a last element removes its step and Undo restores pending evidenc
   const { page, server } = workflow;
   await annotate(page, "#state-one", "First-step annotation");
   const secondNote = await createSecondStep(page);
+  const secondAnnotationId = await secondNote.getAttribute("data-annotation-id");
+  const stableSecondNote = page.locator(`[data-annotation-id="${secondAnnotationId}"]`);
+  await openStepMenu(page);
 
   const stepButtons = page.locator("#pi-filmstrip .pi-step-filter[data-step]:not([data-step='all'])");
   await expect(stepButtons.nth(1).getByLabel("Viewport screenshot pending")).toBeVisible();
-  await secondNote.getByRole("button", { name: "Delete element annotation" }).click();
+  await stableSecondNote.getByRole("button", { name: "Delete element annotation" }).click();
   await expect(stepButtons).toHaveCount(1);
   await expect(page.getByRole("button", { name: "Undo delete" })).toBeEnabled();
 

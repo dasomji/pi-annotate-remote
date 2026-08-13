@@ -7,12 +7,21 @@ export async function annotate(page, targetSelector, comment) {
 }
 
 export async function sendOpenElementAnnotations(page) {
-  const allSteps = page.getByRole("button", { name: /^All steps/ });
-  if (await allSteps.count()) await allSteps.click();
-  const sendButtons = page.getByRole("button", { name: "Send comment" });
-  while (await sendButtons.count()) {
-    await sendButtons.first().click();
+  for (let remaining = 20; remaining > 0; remaining -= 1) {
+    const allSteps = page.getByRole("button", { name: /^All steps/ });
+    if (await allSteps.count()) {
+      if (!await allSteps.isVisible()) await page.getByRole("button", { name: /^More options/ }).click();
+      await allSteps.click();
+      await page.locator("#pi-advanced").evaluate((details) => { details.open = false; });
+    }
+    const openNote = page.locator(".pi-note-card").filter({ visible: true }).first();
+    if (!await openNote.count()) return;
+    const annotationId = await openNote.getAttribute("data-annotation-id");
+    await openNote.getByRole("button", { name: "Send comment" }).click();
+    await page.waitForFunction(() => !document.querySelector("#pi-panel")?.classList.contains("pi-busy"));
+    await page.locator(`.pi-note-card[data-annotation-id="${annotationId}"]`).waitFor({ state: "detached" });
   }
+  throw new Error("Too many open Element annotations to submit in one test");
 }
 
 export async function submitAnnotation(page) {
