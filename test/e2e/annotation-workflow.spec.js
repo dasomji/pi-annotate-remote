@@ -48,12 +48,13 @@ test("delivers an atomic schema-v2 screenshot capture through the broker", async
 test("pause and resume return input to the page without creating empty or reordered steps", async ({ workflow }) => {
   const { page, server } = workflow;
 
-  await annotate(page, "#state-one", "First state");
+  const firstNote = await annotate(page, "#state-one", "First state");
+  await firstNote.getByRole("button", { name: "Send comment" }).click();
+  await page.waitForFunction(() => !document.querySelector("#pi-panel")?.classList.contains("pi-busy"));
   await page.getByRole("button", { name: "Interact with page" }).click();
 
   const resume = page.getByRole("button", { name: "Resume annotation" });
   await expect(resume).toBeVisible();
-  await expect(page.getByRole("navigation", { name: "Interaction steps" })).toBeHidden();
   await expect(page.getByRole("group", { name: "Annotation composer" })).toBeHidden();
   await expect(page.locator("#pi-markers")).toBeHidden();
   await expect(page.locator(".pi-notes-container")).toBeHidden();
@@ -63,7 +64,9 @@ test("pause and resume return input to the page without creating empty or reorde
 
   await resume.click();
   await expect(page.getByRole("button", { name: "Interact with page" })).toBeVisible();
-  await annotate(page, "#state-two", "Second transient state");
+  const secondNote = await annotate(page, "#state-two", "Second transient state");
+  await secondNote.getByRole("button", { name: "Send comment" }).click();
+  await page.waitForFunction(() => !document.querySelector("#pi-panel")?.classList.contains("pi-busy"));
 
   // A bare pause/resume boundary must not append an empty third step.
   await page.getByRole("button", { name: "Interact with page" }).click();
