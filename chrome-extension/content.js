@@ -16,16 +16,19 @@
   const etch = modules.etch;
   const { createDraft } = modules.draft;
   const { createRouteGuard } = modules.routeGuard;
+  const { createNavigationAdapter } = modules.navigation;
+  const { createAnnotationRun } = modules.run;
+  const { createDialogView } = modules.dialogs;
 
   const TEXT_MAX_LENGTH = 500;
   let nextId = 0;
   const makeId = () => globalThis.crypto?.randomUUID?.() || `annotation-${++nextId}`;
 
-  let active = false;
-  let sessionId = null;
-  let mode = "annotating";
-  let operation = "idle";
-  let modal = "none";
+  const run = createAnnotationRun();
+  const dialogs = createDialogView({
+    escapeHtml: inspect.escapeHtml,
+    assetUrl: chrome.runtime.getURL?.("assets/grinsekatze.svg") || "assets/grinsekatze.svg",
+  });
   let minimized = false;
   let etchEnabled = false;
   let debugMode = false;
@@ -41,8 +44,6 @@
   let failedCapture = null;
   let deliveryError = "";
   let deliveryConfirmedDegraded = false;
-  let lastFocusedControl = null;
-  let routeDialog = null;
   let bubbleDrag = null;
   let noteDrag = null;
   let bubbleDragged = false;
@@ -68,14 +69,21 @@
 
   chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
     if (message.type !== "START_ANNOTATION") return;
-    sessionId = typeof message.sessionId === "string" ? message.sessionId : null;
-    if (active) resetDraft();
-    else activate();
+    const wasActive = run.active;
+    run.start(message.sessionId);
+    if (wasActive) {
+      navigationAdapter.stop();
+      routeGuard.stop();
+      resetDraft();
+      navigationAdapter.start();
+      routeGuard.start();
+    } else {
+      activate();
+    }
     sendResponse({ started: true });
   });
 
   function activate() {
-    active = true;
     styleEl = document.createElement("style");
     styleEl.id = "pi-styles";
     styleEl.textContent = STYLES;
@@ -106,8 +114,6 @@
     document.addEventListener("keydown", onKeyDown, true);
     document.addEventListener("mousemove", onDragMove, true);
     document.addEventListener("mouseup", endBubbleDrag, true);
-    document.addEventListener("submit", onFormSubmit, true);
-    document.addEventListener("formdata", onFormData, true);
     window.addEventListener("scroll", renderEvidence, true);
     window.addEventListener("resize", onResize);
     if (typeof MutationObserver !== "undefined") {
@@ -115,8 +121,9 @@
       livenessObserver.observe(document.body, { childList: true, subtree: true });
     }
     document.body.style.cursor = "crosshair";
+    navigationAdapter.start();
     routeGuard.start();
-    render();
+    resetDraft();
   }
 
   function createPanel() {
@@ -184,20 +191,20 @@
     byId("pi-undo")?.addEventListener("click", undoDelete);
     byId("pi-filter-all")?.addEventListener("click", () => setFilter("all"));
     byId("pi-context")?.addEventListener("input", (event) => {
-      if (operation === "idle") draft.setContext(event.target.value);
+      if (run.operation === "idle") draft.setContext(event.target.value);
     });
     byId("pi-etch-mode")?.addEventListener("change", (event) => {
-      if (operation !== "idle") {
+      if (run.operation !== "idle") {
         event.target.checked = etchEnabled;
         return;
       }
       etchEnabled = event.target.checked;
       event.target.closest?.(".pi-etch-toggle")?.classList.toggle("recording", etchEnabled);
-      if (etchEnabled && mode === "annotating") etch.start();
+      if (etchEnabled && run.mode === "annotating") etch.start();
       else etch.stop();
     });
     byId("pi-debug-mode")?.addEventListener("change", (event) => {
-      if (operation === "idle") {
+      if (run.operation === "idle") {
         debugMode = event.target.checked;
         render();
       }
@@ -212,18 +219,15 @@
     draft.purge();
     draft = createDraft({ createId: makeId });
     records.clear();
-    mode = "annotating";
-    operation = "idle";
-    modal = "none";
     minimized = false;
     etchEnabled = false;
     debugMode = false;
     stepFilter = "all";
     activeRecordId = null;
-    noteDrag = null;
     failedCapture = null;
     deliveryError = "";
     deliveryConfirmedDegraded = false;
+    clearTransientControllerState();
     byId("pi-context") && (byId("pi-context").value = "");
     byId("pi-etch-mode") && (byId("pi-etch-mode").checked = false);
     byId("pi-debug-mode") && (byId("pi-debug-mode").checked = false);
@@ -232,10 +236,11 @@
   }
 
   function deactivate({ purge = true } = {}) {
-    if (!active) return;
-    active = false;
+    if (!run.active) return;
+    run.stop();
     settleCaptureLifecycle();
     cleanupCaptureReturnAnimation();
+    navigationAdapter.stop();
     routeGuard.stop();
     if (purge) draft.purge();
     etch.reset();
@@ -245,8 +250,6 @@
     document.removeEventListener("keydown", onKeyDown, true);
     document.removeEventListener("mousemove", onDragMove, true);
     document.removeEventListener("mouseup", endBubbleDrag, true);
-    document.removeEventListener("submit", onFormSubmit, true);
-    document.removeEventListener("formdata", onFormData, true);
     window.removeEventListener("scroll", renderEvidence, true);
     window.removeEventListener("resize", onResize);
     livenessObserver?.disconnect();
@@ -259,8 +262,24 @@
     styleEl = panelEl = highlightEl = connectorsEl = markersEl = notesEl = null;
     records.clear();
     activeRecordId = null;
+    clearTransientControllerState();
+  }
+
+  function clearTransientControllerState() {
+    hovered = null;
+    hoverStack = [];
+    hoverIndex = 0;
+    capturePromise = null;
+    transitionPromise = null;
+    bubbleDrag = null;
+    noteDrag?.card?.classList.remove("dragging");
     noteDrag = null;
-    sessionId = null;
+    bubbleDragged = false;
+    bubblePosition = null;
+    escapeCount = 0;
+    if (escapeTimer !== null) clearTimeout(escapeTimer);
+    escapeTimer = null;
+    hideHighlight();
   }
 
   function freezeMetadata(element) {
@@ -285,7 +304,7 @@
   }
 
   function selectElement(sourceNode) {
-    if (mode !== "annotating" || operation !== "idle" || modal !== "none") return;
+    if (!run.canAnnotate()) return;
     const previousStepId = currentResult().steps.at(-1)?.id || null;
     const result = draft.stageElement({
       sourceNode,
@@ -314,8 +333,8 @@
   }
 
   async function captureElement(sourceNode, { retargetId = null } = {}) {
-    if (mode !== "annotating" || operation !== "idle" || modal !== "none") return;
-    const metadata = freezeMetadata(sourceNode);
+    if (!run.canAnnotate()) return;
+    const metadata = retargetId ? null : freezeMetadata(sourceNode);
     const clientRect = sourceNode.getBoundingClientRect();
     const cropRect = {
       x: clientRect.left,
@@ -358,22 +377,22 @@
       failedCapture = {
         transaction: transaction.transaction,
         sourceNode,
-        metadata,
       };
       showCaptureFailure(transaction.status === "source-disconnected");
       return;
     }
 
-    operation = "capturing";
-    failedCapture = { transaction, sourceNode, metadata };
+    const operationToken = run.beginCapture();
+    if (!operationToken) return;
+    failedCapture = { transaction, sourceNode };
     render();
-    capturePromise = performCapture(transaction);
+    capturePromise = performCapture(transaction, operationToken);
     await capturePromise;
     capturePromise = null;
     render();
   }
 
-  async function performCapture(transaction) {
+  async function performCapture(transaction, operationToken) {
     // Let the live-region progress state paint before temporarily removing the
     // extension chrome from the source bitmap.
     await twoFrames();
@@ -411,8 +430,8 @@
       restoreWithFlourish();
     }
 
+    if (!run.settle(operationToken)) return;
     const result = draft.commitCapture(transaction, { viewportImage, cropImage });
-    operation = "idle";
     if (result.status === "committed") {
       finalizeCommittedCapture(result, transaction);
       return;
@@ -431,7 +450,7 @@
   }
 
   async function retryCapture() {
-    if (!failedCapture || operation !== "idle") return;
+    if (!failedCapture || run.operation !== "idle") return;
     const pending = failedCapture;
     closeModal();
     if (pending.sourceNode.isConnected === false) {
@@ -444,7 +463,7 @@
   }
 
   function keepIncomplete() {
-    if (!failedCapture || operation !== "idle") return;
+    if (!failedCapture || run.operation !== "idle") return;
     const transaction = failedCapture.transaction;
     const attempt = transaction.attempt;
     const disconnected = failedCapture.sourceNode.isConnected === false;
@@ -511,7 +530,7 @@
       title: disconnected ? "Source element is no longer available" : "Screenshot capture failed",
       description: terminal
         ? "Keep the frozen element as incomplete evidence, or discard it."
-        : `Attempt ${attempt} of 3 failed. Retry captures a fresh point in time.`,
+        : `Attempt ${attempt} of 3 failed. Retry captures a fresh screenshot.`,
       actions: terminal
         ? [["Keep incomplete", keepIncomplete, "primary"], ["Discard", discardFailedCapture]]
         : [["Retry", retryCapture, "primary"], ["Discard", discardFailedCapture]],
@@ -519,13 +538,15 @@
   }
 
   async function pause() {
-    if (mode !== "annotating" || operation !== "idle" || modal !== "none") return;
-    operation = "pausing";
+    const operationToken = run.beginPause();
+    if (!operationToken) return;
     render();
     transitionPromise = (async () => {
-      await finalizeEtchPeriod("Etch capture could not be finalized while pausing");
-      mode = "interacting";
-      operation = "idle";
+      await finalizeEtchPeriod(
+        "Etch capture could not be finalized while pausing",
+        operationToken,
+      );
+      if (!run.finishPause(operationToken)) return;
       minimized = false;
       document.body.style.cursor = "";
       render();
@@ -543,8 +564,7 @@
   }
 
   function resume() {
-    if (mode !== "interacting" || operation !== "idle") return;
-    mode = "annotating";
+    if (!run.resume()) return;
     draft.armStepBoundary();
     document.body.style.cursor = "crosshair";
     if (etchEnabled) etch.start();
@@ -552,14 +572,16 @@
     byId("pi-pause")?.focus();
   }
 
-  async function finalizeEtchPeriod(warning) {
+  async function finalizeEtchPeriod(warning, operationToken) {
     if (!etchEnabled) return;
     const restore = hideChrome();
     await twoFrames();
     try {
       const finalized = await etch.finalize();
+      if (!run.isCurrent(operationToken)) return;
       if (finalized?.changeCount > 0) draft.appendEtchCapture(finalized);
     } catch (error) {
+      if (!run.isCurrent(operationToken)) return;
       console.error("[pi-annotate] Etch period finalization failed:", error);
       draft.addEtchWarning(`${warning}: ${errorMessage(error)}`);
     } finally {
@@ -568,18 +590,22 @@
   }
 
   async function submit() {
-    if (operation !== "idle" || modal !== "none") return;
-    if (!sessionId) {
+    const operationToken = run.beginDelivery();
+    if (!operationToken) return;
+    if (!run.sessionId) {
+      run.settle(operationToken);
       setDeliveryError("No Pi annotation session is selected. Start again from the session chooser.");
       return;
     }
     draft.setContext(byId("pi-context")?.value || "");
     if (draft.hasPendingEvidence()) {
+      run.settle(operationToken);
       setDeliveryError("Send every open Element annotation before submitting.");
       render();
       return;
     }
     if (draft.hasMissingEvidence() && !deliveryConfirmedDegraded) {
+      run.settle(operationToken);
       const affected = missingEvidenceLabels(draft.snapshot());
       showModal("degradedDelivery", {
         title: "Some screenshots are missing",
@@ -596,16 +622,19 @@
       return;
     }
 
-    operation = "delivering";
     deliveryError = "";
     render();
-    await finalizeEtchPeriod("Etch capture could not be finalized for submission");
+    await finalizeEtchPeriod(
+      "Etch capture could not be finalized for submission",
+      operationToken,
+    );
+    if (!run.isCurrent(operationToken)) return;
     draft.refreshLiveness();
     let result;
     try {
       result = draft.toAnnotationResult({ url: window.location.href });
     } catch (error) {
-      operation = "idle";
+      run.settle(operationToken);
       restartEtchAfterDeliveryAttempt();
       setDeliveryError(errorMessage(error));
       render();
@@ -615,15 +644,17 @@
     try {
       const response = await chrome.runtime.sendMessage({
         type: "ANNOTATIONS_COMPLETE",
-        sessionId,
+        sessionId: run.sessionId,
         result,
       });
+      if (!run.isCurrent(operationToken)) return;
       if (!response?.delivered) throw new Error(response?.error || "The broker did not acknowledge delivery");
       draft.purge();
       await routeGuard.deliverySettled({ acknowledged: true });
+      if (!run.isCurrent(operationToken)) return;
       deactivate({ purge: false });
     } catch (error) {
-      operation = "idle";
+      if (!run.settle(operationToken)) return;
       restartEtchAfterDeliveryAttempt();
       setDeliveryError(`Delivery failed: ${errorMessage(error)}`);
       render();
@@ -632,7 +663,7 @@
   }
 
   function restartEtchAfterDeliveryAttempt() {
-    if (etchEnabled && mode === "annotating") etch.start();
+    if (etchEnabled && run.mode === "annotating") etch.start();
   }
 
   function missingEvidenceLabels(snapshot) {
@@ -652,11 +683,11 @@
 
   function render() {
     if (!panelEl) return;
-    panelEl.classList.toggle("pi-interacting", mode === "interacting");
-    panelEl.classList.toggle("pi-minimized", minimized && mode === "annotating");
-    panelEl.classList.toggle("pi-busy", operation !== "idle");
+    panelEl.classList.toggle("pi-interacting", run.mode === "interacting");
+    panelEl.classList.toggle("pi-minimized", minimized && run.mode === "annotating");
+    panelEl.classList.toggle("pi-busy", run.operation !== "idle");
     projectPanelPosition();
-    const busy = operation !== "idle";
+    const busy = run.operation !== "idle";
     const snapshot = draft.snapshot();
     const draftMutationBlocked = busy || snapshot.capture !== null;
     for (const id of ["pi-pause", "pi-submit", "pi-close", "pi-undo", "pi-help", "pi-minimize", "pi-context", "pi-etch-mode", "pi-debug-mode"]) {
@@ -665,14 +696,14 @@
     }
     const status = byId("pi-capture-status");
     if (status) status.textContent =
-      operation === "capturing" ? "Capturing element evidence…" :
-      operation === "pausing" ? "Finishing captured edits…" :
-      operation === "delivering" ? "Sending annotation…" :
+      run.operation === "capturing" ? "Capturing element evidence…" :
+      run.operation === "pausing" ? "Finishing captured edits…" :
+      run.operation === "delivering" ? "Sending annotation…" :
       snapshot.etchWarnings.at(-1) || "";
     const submitButton = byId("pi-submit");
     if (submitButton) {
       submitButton.disabled = draftMutationBlocked;
-      submitButton.textContent = operation === "delivering" ? "Sending…" : (deliveryError ? "Retry" : "Submit");
+      submitButton.textContent = run.operation === "delivering" ? "Sending…" : (deliveryError ? "Retry" : "Submit");
       submitButton.title = snapshot.hasPendingEvidence
         ? "Send every open Element annotation before submitting"
         : "";
@@ -697,7 +728,7 @@
       error.textContent = deliveryError;
       error.hidden = !deliveryError;
     }
-    const evidenceVisible = mode === "annotating";
+    const evidenceVisible = run.mode === "annotating";
     if (connectorsEl) connectorsEl.style.display = evidenceVisible ? "" : "none";
     if (markersEl) markersEl.style.display = evidenceVisible ? "" : "none";
     if (notesEl) notesEl.style.display = evidenceVisible ? "" : "none";
@@ -707,7 +738,7 @@
   }
 
   function projectPanelPosition() {
-    const compact = mode === "interacting" || minimized;
+    const compact = run.mode === "interacting" || minimized;
     if (compact && bubblePosition) {
       Object.assign(panelEl.style, {
         left: `${bubblePosition.x}px`, top: `${bubblePosition.y}px`,
@@ -739,7 +770,7 @@
     result.steps.forEach((step, index) => {
       const button = document.createElement("button");
       button.className = `pi-step-filter ${stepFilter === step.id ? "active" : ""}`;
-      button.disabled = operation !== "idle";
+      button.disabled = run.operation !== "idle";
       button.dataset.step = step.id;
       button.setAttribute("aria-pressed", String(stepFilter === step.id));
       button.setAttribute("aria-label", `Step ${index + 1}, ${step.elements.length} element annotations`);
@@ -877,7 +908,7 @@
     card.style.visibility = "hidden";
     const commentField = card.querySelector?.(".pi-note-textarea");
     commentField?.addEventListener("input", (event) => {
-      if (operation === "idle") draft.updateComment(id, event.target.value);
+      if (run.operation === "idle") draft.updateComment(id, event.target.value);
     });
     commentField?.addEventListener("keydown", (event) => {
       if (event.key !== "Enter" || (!event.metaKey && !event.ctrlKey) ||
@@ -891,7 +922,7 @@
     card.querySelector?.(".pi-note-expand")?.addEventListener("click", () => moveElementTarget(id, "up"));
     card.querySelector?.(".pi-note-contract")?.addEventListener("click", () => moveElementTarget(id, "down"));
     card.querySelector?.(".pi-note-header")?.addEventListener("mousedown", (event) => {
-      if (event.button !== 0 || operation !== "idle" || modal !== "none" ||
+      if (event.button !== 0 || run.operation !== "idle" || run.modal !== "none" ||
           event.target.closest?.("button")) return;
       const bounds = card.getBoundingClientRect();
       noteDrag = {
@@ -927,7 +958,7 @@
     const bounds = card.getBoundingClientRect();
     const maxLeft = Math.max(margin, window.innerWidth - bounds.width - margin);
     const panelBounds = panelEl?.getBoundingClientRect?.();
-    const reservesBottom = mode === "annotating" && !minimized && panelBounds?.top > margin;
+    const reservesBottom = run.mode === "annotating" && !minimized && panelBounds?.top > margin;
     const availableBottom = reservesBottom ? panelBounds.top - 12 : window.innerHeight - margin;
     const availableHeight = Math.max(96, availableBottom - margin);
     card.style.maxHeight = `${availableHeight}px`;
@@ -964,7 +995,7 @@
     if (!moveUp || !moveDown || !record) return;
 
     const currentStep = draft.isCurrentStep(id);
-    const blocked = operation !== "idle" || modal !== "none";
+    const blocked = run.operation !== "idle" || run.modal !== "none";
     const sourceAvailable = record.sourceNode?.isConnected !== false;
     const parent = sourceAvailable ? record.sourceNode.parentElement : null;
     const canMoveUp = parent && parent !== document.body && parent !== document.documentElement &&
@@ -1001,7 +1032,7 @@
   }
 
   function moveElementTarget(id, direction) {
-    if (operation !== "idle" || modal !== "none" || !draft.canRetarget(id)) return;
+    if (run.operation !== "idle" || run.modal !== "none" || !draft.canRetarget(id)) return;
     const record = records.get(id);
     if (!record?.navigation || record.sourceNode?.isConnected === false) return;
 
@@ -1043,7 +1074,7 @@
   }
 
   function deleteRecord(id) {
-    if (operation !== "idle" || modal !== "none" || !draft.softDelete(id)) return;
+    if (run.operation !== "idle" || run.modal !== "none" || !draft.softDelete(id)) return;
     if (activeRecordId === id) activeRecordId = null;
     notesEl.querySelector?.(`[data-annotation-id="${id}"]`)?.remove();
     byId("pi-undo") && (byId("pi-undo").disabled = false);
@@ -1053,7 +1084,7 @@
   }
 
   async function sendNote(id) {
-    if (operation !== "idle" || modal !== "none") return;
+    if (run.operation !== "idle" || run.modal !== "none") return;
     const record = records.get(id);
     if (!record?.sourceNode || record.sourceNode.isConnected === false) return;
     record.noteOpen = false;
@@ -1064,7 +1095,7 @@
   }
 
   function undoDelete() {
-    if (operation !== "idle" || modal !== "none") return;
+    if (run.operation !== "idle" || run.modal !== "none") return;
     const restored = draft.undo();
     if (!restored) return;
     records.get(restored.id) && (records.get(restored.id).stepId = restored.stepId);
@@ -1073,7 +1104,7 @@
   }
 
   function setFilter(value) {
-    if (operation !== "idle" || modal !== "none") return;
+    if (run.operation !== "idle" || run.modal !== "none") return;
     stepFilter = value;
     render();
   }
@@ -1086,7 +1117,7 @@
   }
 
   function onMouseMove(event) {
-    if (!active || mode !== "annotating" || operation !== "idle" || modal !== "none" ||
+    if (!run.canAnnotate() ||
         event.target.closest?.("#pi-panel") || event.target.closest?.(".pi-note-card")) {
       hideHighlight();
       return;
@@ -1113,7 +1144,7 @@
   }
 
   function onWheel(event) {
-    if (mode !== "annotating" || operation !== "idle" || modal !== "none" ||
+    if (!run.canAnnotate() ||
         !event.altKey || hoverStack.length === 0 ||
         event.target.closest?.("#pi-panel") || event.target.closest?.(".pi-note-card")) return;
     event.preventDefault();
@@ -1130,7 +1161,7 @@
   }
 
   function onPageClick(event) {
-    if (!active || mode !== "annotating" ||
+    if (!run.ownsPageClicks() ||
         event.target.closest?.("#pi-panel") || event.target.closest?.(".pi-note-card") ||
         event.target.closest?.("#pi-markers") ||
         event.target.closest?.(".pi-modal-backdrop") ||
@@ -1140,7 +1171,7 @@
     // Annotation mode retains page-click ownership while an atomic capture,
     // Etch finalization, delivery, or modal decision is in flight. Additional
     // clicks are ignored rather than leaking through to the site.
-    if (operation !== "idle" || modal !== "none") return;
+    if (!run.canAnnotate()) return;
     const source = hovered || event.target;
     if (source && !inspect.isPiElement(source)) selectElement(source);
   }
@@ -1156,7 +1187,7 @@
     const display = elements.map((element) => [element, element.style.display]);
     elements.forEach((element) => { element.style.display = "none"; });
     return () => {
-      if (!active) return;
+      if (!run.active) return;
       display.forEach(([element, value]) => {
         if (element.isConnected) element.style.display = value;
       });
@@ -1185,7 +1216,7 @@
   }
 
   function setMinimized(value) {
-    if (mode !== "annotating" || operation !== "idle") return;
+    if (run.mode !== "annotating" || run.operation !== "idle") return;
     minimized = value;
     render();
   }
@@ -1199,7 +1230,8 @@
   }
 
   function beginBubbleDrag(event) {
-    if (event.button !== 0 || operation !== "idle" || (!minimized && mode !== "interacting")) return;
+    if (event.button !== 0 || run.operation !== "idle" ||
+        (!minimized && run.mode !== "interacting")) return;
     const rect = panelEl.getBoundingClientRect();
     bubbleDrag = { x: event.clientX, y: event.clientY, left: rect.left, top: rect.top };
     bubbleDragged = false;
@@ -1259,54 +1291,29 @@
     if (!affectsSource) return;
     livenessFrame = requestAnimationFrame(() => {
       livenessFrame = null;
-      if (active) render();
+      if (run.active) render();
     });
   }
 
   function showModal(kind, { title, description, actions, returnFocus } = {}) {
     closeModal();
-    modal = kind;
-    lastFocusedControl = returnFocus || document.activeElement || byId("pi-pause");
-    const backdrop = document.createElement("div");
-    const kindClass = kind.replace(/[A-Z]/g, (letter) => `-${letter.toLowerCase()}`);
-    backdrop.className = kind === "abort" ? "pi-abort-backdrop" : `pi-modal-backdrop pi-${kindClass}-backdrop`;
-    backdrop.innerHTML = `
-      <div class="pi-modal" role="dialog" aria-modal="true" aria-labelledby="pi-modal-title"
-        aria-describedby="pi-modal-description">
-        <h2 id="pi-modal-title">${inspect.escapeHtml(title)}</h2>
-        <p id="pi-modal-description">${inspect.escapeHtml(description)}</p>
-        <div class="pi-modal-actions"></div>
-      </div>`;
-    let actionRow = backdrop.querySelector(".pi-modal-actions");
-    if (!actionRow) {
-      actionRow = document.createElement("div");
-      actionRow.className = "pi-modal-actions";
-      backdrop.appendChild(actionRow);
-    }
-    for (const [label, handler, variant] of actions) {
-      const button = document.createElement("button");
-      if (kind === "abort" && label === "Continue annotating") button.id = "pi-abort-continue";
-      if (kind === "abort" && label === "Abort annotation") button.id = "pi-abort-confirm";
-      button.className = `pi-btn ${variant === "primary" ? "pi-btn-submit" : "pi-btn-cancel"}`;
-      button.textContent = label;
-      button.addEventListener("click", handler);
-      actionRow.appendChild(button);
-    }
-    document.body.appendChild(backdrop);
-    routeDialog = backdrop;
-    actionRow.querySelector("button")?.focus();
+    if (!run.openModal(kind)) return;
+    dialogs.open({
+      kind,
+      title,
+      description,
+      actions,
+      focusTarget: returnFocus || document.activeElement || byId("pi-pause"),
+    });
   }
 
   function closeModal() {
-    routeDialog?.remove();
-    routeDialog = null;
-    modal = "none";
-    lastFocusedControl?.focus?.();
-    lastFocusedControl = null;
+    dialogs.remove();
+    run.closeModal();
   }
 
   function showAbortDialog() {
-    if (operation !== "idle" || modal !== "none") return;
+    if (run.operation !== "idle" || run.modal !== "none") return;
     showModal("abort", {
       title: "Abort annotation?",
       description: "Your interaction steps, comments, and captured edits will be discarded.",
@@ -1319,52 +1326,20 @@
   }
 
   function showHelpDialog() {
-    if (operation !== "idle" || modal !== "none") return;
-    modal = "help";
-    lastFocusedControl = byId("pi-help");
-    const iconUrl = chrome.runtime.getURL?.("assets/grinsekatze.svg") ||
-      "assets/grinsekatze.svg";
-    const backdrop = document.createElement("div");
-    backdrop.className = "pi-modal-backdrop pi-help-backdrop";
-    backdrop.innerHTML = `
-      <section class="pi-modal pi-help-dialog" role="dialog" aria-modal="true"
-        aria-labelledby="pi-help-title">
-        <header class="pi-help-header">
-          <img class="pi-grinsekatze-icon" src="${iconUrl}" alt="Grinsekatze">
-          <div><h2 id="pi-help-title">How to annotate</h2>
-            <p>Share clear visual feedback with your annotation session.</p></div>
-          <button class="pi-icon-button pi-help-close" aria-label="Close help">×</button>
-        </header>
-        <ol class="pi-help-steps">
-          <li><strong>Select an element</strong><span>Click an element and write its Element annotation.</span></li>
-          <li><strong>Create interaction steps</strong><span>Use Interact with page, then Resume annotation after interacting.</span></li>
-          <li><strong>Add general context and submit</strong><span>Describe the overall goal, then submit the annotation.</span></li>
-        </ol>
-        <p class="pi-help-tip"><strong>Etch</strong> records visible edits. Press <kbd>Escape</kbd> three times to abort.</p>
-      </section>`;
-    backdrop.querySelector?.(".pi-help-close")?.addEventListener("click", closeModal);
-    backdrop.addEventListener("click", (event) => {
-      if (event.target === backdrop) closeModal();
+    if (!run.openModal("help")) return;
+    dialogs.openHelp({
+      onClose: closeModal,
+      focusTarget: byId("pi-help"),
     });
-    document.body.appendChild(backdrop);
-    routeDialog = backdrop;
-    backdrop.querySelector?.(".pi-help-close")?.focus();
   }
 
   function onKeyDown(event) {
-    if (!active) return;
-    if (mode === "interacting" && modal === "none") return;
-    if (modal !== "none") {
+    if (!run.active) return;
+    if (run.mode === "interacting" && run.modal === "none") return;
+    if (run.modal !== "none") {
       if (event.key === "Tab") {
-        const buttons = Array.from(routeDialog?.querySelectorAll?.("button") || []);
-        if (!buttons.length) return;
-        const index = buttons.indexOf(document.activeElement);
-        const next = event.shiftKey
-          ? (index <= 0 ? buttons.length - 1 : index - 1)
-          : (index >= buttons.length - 1 ? 0 : index + 1);
-        event.preventDefault();
-        buttons[next].focus();
-      } else if (event.key === "Escape" && !["routeGuard", "captureFailure"].includes(modal)) {
+        dialogs.trapTab(event);
+      } else if (event.key === "Escape" && !["routeGuard", "captureFailure"].includes(run.modal)) {
         event.preventDefault();
         closeModal();
       }
@@ -1406,145 +1381,20 @@
     });
   }
 
-  let rememberedFormReplay = null;
-
-  function onFormData(event) {
-    const form = event.target;
-    if (!form || !(draft.hasRecoverableWork() || etch.hasChanges?.() === true)) return;
-    const target = (form.target || "").toLowerCase();
-    if (target && !["_self", "_top", "_parent"].includes(target)) return;
-    const descriptor = freezeFormReplayEntries(form, null, Array.from(event.formData.entries()));
-    rememberedFormReplay = { at: Date.now(), replay: descriptor.replay };
-  }
-
-  function onFormSubmit(event) {
-    const form = event.target;
-    if (!form || !(draft.hasRecoverableWork() || etch.hasChanges?.() === true)) return;
-    const submitter = event.submitter;
-    const target = (
-      submitter?.hasAttribute?.("formtarget") ? submitter.formTarget : form.target || ""
-    ).toLowerCase();
-    if (target && !["_self", "_top", "_parent"].includes(target)) return;
-    const descriptor = freezeFormReplay(form, submitter);
-    rememberedFormReplay = {
-      at: Date.now(),
-      replay: descriptor.replay,
-    };
-
-    // Chromium does not expose every form submission as a cancelable
-    // Navigation event in the isolated world. The submit event is itself a
-    // synchronous, exact-source seam, so retain and cancel it here.
-    if (event.cancelable) {
-      event.preventDefault();
-      const retained = rememberedFormReplay;
-      rememberedFormReplay = null;
-      routeGuard.retainCanceledRoute(retained);
-    }
-  }
-
-  function createFrozenFormReplay(config, entries) {
-    return {
-      replay: () => {
-        const replayForm = document.createElement("form");
-        replayForm.style.display = "none";
-        replayForm.action = config.action;
-        replayForm.method = config.method;
-        replayForm.enctype = config.enctype;
-        replayForm.target = config.target;
-        for (const [name, value] of entries) {
-          const isFile = typeof File !== "undefined" && value instanceof File;
-          if (isFile && typeof DataTransfer !== "undefined") {
-            const input = document.createElement("input");
-            input.type = "file";
-            input.name = name;
-            const transfer = new DataTransfer();
-            transfer.items.add(value);
-            input.files = transfer.files;
-            replayForm.appendChild(input);
-          } else {
-            const input = document.createElement("input");
-            input.type = "hidden";
-            input.name = name;
-            input.value = isFile ? value.name : value;
-            replayForm.appendChild(input);
-          }
-        }
-        document.body.appendChild(replayForm);
-        try {
-          return HTMLFormElement.prototype.submit.call(replayForm);
-        } finally {
-          replayForm.remove();
-        }
-      },
-    };
-  }
-
-  function freezeFormReplay(form, submitter) {
-    return freezeFormReplayEntries(
-      form,
-      submitter,
-      Array.from(new FormData(form, submitter).entries()),
-    );
-  }
-
-  function freezeFormReplayEntries(form, submitter, entries) {
-    const submitterOverride = (attribute, property, fallback) =>
-      submitter?.hasAttribute?.(attribute) ? submitter[property] : fallback;
-    return createFrozenFormReplay({
-      action: submitterOverride("formaction", "formAction", form.action) || window.location.href,
-      method: (submitterOverride("formmethod", "formMethod", form.method) || "get").toLowerCase(),
-      enctype: submitterOverride("formenctype", "formEnctype", form.enctype) ||
-        "application/x-www-form-urlencoded",
-      target: submitterOverride("formtarget", "formTarget", form.target) || "_self",
-    }, entries);
-  }
-
-  function createReplayDescriptor(event) {
-    if (event.formData && rememberedFormReplay && Date.now() - rememberedFormReplay.at < 1000) {
-      const descriptor = rememberedFormReplay;
-      rememberedFormReplay = null;
-      return descriptor;
-    }
-    const destination = event.destination?.url;
-    if (!destination) throw new Error("The canceled route has no destination");
-    if (event.formData) {
-      throw new Error("The canceled POST route could not be reconstructed exactly");
-    }
-    const navigation = window.navigation;
-    if (event.navigationType === "reload") {
-      return {
-        replay: () => navigation?.reload
-          ? navigation.reload({ state: event.destination?.getState?.() }).finished
-          : window.location.reload(),
-      };
-    }
-    if (event.navigationType === "traverse" && event.destination?.key && navigation?.traverseTo) {
-      const key = event.destination.key;
-      return { replay: () => navigation.traverseTo(key).finished };
-    }
-    const history = event.navigationType === "replace" ? "replace" : "push";
-    return {
-      replay: () => {
-        if (navigation?.navigate) {
-          return navigation.navigate(destination, {
-            history,
-            state: event.destination?.getState?.(),
-          }).finished;
-        }
-        window.location.href = destination;
-      },
-    };
-  }
-
   function settleCaptureLifecycle() {
     resolveCaptureLifecycle?.();
     resolveCaptureLifecycle = null;
     captureLifecyclePromise = null;
   }
 
+  const navigationAdapter = createNavigationAdapter({
+    isDirty: () => draft.hasRecoverableWork() || etch.hasChanges?.() === true,
+    retainCanceledRoute: (descriptor) => routeGuard.retainCanceledRoute(descriptor),
+  });
+
   const routeGuard = createRouteGuard({
     isDirty: () => draft.hasRecoverableWork() || etch.hasChanges?.() === true,
-    getOperation: () => operation,
+    getOperation: () => run.operation,
     settleOperation: async () => {
       if (captureLifecyclePromise) await captureLifecyclePromise;
       else if (capturePromise) await capturePromise;
@@ -1558,7 +1408,7 @@
       render();
     },
     showDecision: showRouteDecision,
-    createReplayDescriptor,
+    createReplayDescriptor: navigationAdapter.createReplayDescriptor,
     onReplayError: (error) => setDeliveryError(`Annotation discarded, but navigation failed: ${errorMessage(error)}`),
   });
 

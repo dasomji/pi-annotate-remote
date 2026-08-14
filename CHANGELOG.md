@@ -5,7 +5,8 @@ All notable changes to Pi Annotate.
 ## [Unreleased]
 
 ### Breaking
-- Replaced the same-machine Native Messaging transport with a broker-only HTTPS flow. Existing browser installations must load the broker-based extension, connect it to a Tailscale Serve endpoint, and grant endpoint-scoped host access.
+- Renamed the extension command to use the Session chooser vocabulary; reassign a previously customized shortcut if Chrome does not carry it forward.
+- Replaced the same-machine Native Messaging transport with a broker-only authenticated flow. Existing browser installations must load the broker-based extension, connect it to a Tailscale Serve or same-machine loopback endpoint, and grant endpoint-scoped host access.
 - Pinned a stable unpacked-extension ID for secure pairing-page handoff. Existing unpacked installations must remove the old extension once, load the new copy, and pair again because Chrome treats it as a new identity.
 - `/annotate` now makes the current Pi session available to the browser instead of opening a URL and waiting for one tool request. Browser submissions arrive as acknowledged user messages in the selected session.
 
@@ -16,12 +17,12 @@ All notable changes to Pi Annotate.
 - Shared detached localhost broker with bearer authentication, private XDG-aware state, bounded requests, local IPC session registration, reconnects, exact opaque-session routing, delivery acknowledgements, and timeouts.
 - `/annotate on`, `/annotate off`, `/annotate status`, and `/annotate setup` lifecycle controls.
 - Centered in-page live-session chooser with radio options, circular refresh action, loading/empty/error states, focus trapping, and active-page annotation start; browser-owned pages and connection settings use a compact extension-window fallback.
-- Browser-local session recommendations keyed by page origin, with the last live session used for a site preselected and labelled in the picker.
+- Browser-local session recommendations keyed by page origin, with the last live session used for a site preselected and labelled in the Session chooser.
 - Shortcut settings that show Chrome's active assignment and open `chrome://extensions/shortcuts` when it is missing or needs to change.
 - Draggable minimized annotation bubble with selection count and no reserved bottom-page space.
 - Accessible three-Escape abort confirmation flow; Escape no longer immediately discards annotation work.
 - Delivery retry state that preserves the content UI until the selected Pi session acknowledges receipt.
-- Automated broker, service-worker, in-page chooser, fallback popup, content delivery, and interaction-state tests.
+- Automated broker, service-worker, in-page chooser, fallback-window, content-delivery, and interaction-state tests.
 
 ### Changed
 - `/annotate` now prints a fresh pairing link when Tailscale Serve is active, followed by the exact verified HTTPS endpoint and bearer token as a manual fallback; `/annotate setup` forces a fresh Serve check and pairing code.
@@ -31,15 +32,19 @@ All notable changes to Pi Annotate.
 - The annotation content script is injected only into the session chooser’s remembered target tab after an explicit **Start annotation** action; the separate chooser script contains no broker credentials.
 - The annotation bar is now a rounded floating box with 30px side margins, a 20px bottom margin, and a multiline general-context field.
 - Full screenshot mode is described accurately as the visible viewport rather than the entire scrollable page.
-- Broker host permission is optional and requested for only the configured hostname. Remote brokers require HTTPS; localhost HTTP remains available for development.
+- Broker host permission is optional and requested for only the configured hostname. Remote brokers require HTTPS; localhost HTTP remains available for same-machine use.
 - Pi sessions are labelled with project directory and Git branch while routing uses a random opaque ID.
 
 ### Changed (internal)
+- Split annotation-run lifecycle, exact navigation replay, and dialog presentation out of the page controller, with generation guards preventing stale async work from mutating a later run.
 - Split the annotator content script into ordered modules (styles, element inspection, screenshot post-processing, etch capture) injected before the `content.js` entry point; no user-facing behavior change.
 - Extracted one shared send-with-acknowledgement-or-inject helper used by both the session chooser and annotator start paths.
-- Aligned the extension manifest version with the package version.
+- Aligned the extension manifest version with the package version and made the repository check enforce the match.
 
 ### Fixed
+- Serialized Pi-side annotation handling so asynchronous formatting cannot reverse broker arrival order.
+- Kept accepted-click metadata and geometry frozen across Send-time screenshot attempts and retries.
+- Reset every annotation-run transient before a second run on the same page, instead of inheriting a completed delivery state.
 - Required an explicit annotator acknowledgement before treating **Start annotation** as handled, preventing the in-page session chooser from closing without opening the annotation bar.
 - A failed annotator start after injection now reports "Pi Annotate could not start on this page" instead of a raw Chrome messaging error.
 - The broker daemon now writes its lock file atomically, so a concurrent starter can no longer misread a half-written lock as stale and remove a live daemon's lock.
@@ -148,7 +153,7 @@ All notable changes to Pi Annotate.
 - **New tab fallback** — When current tab is restricted and a URL is provided, opens a new tab instead of failing
 - **`isRestrictedUrl()` helper** — Detects `chrome://`, `chrome-extension://`, `edge://`, `about:`, `devtools://`, `view-source:` URLs
 - **`injectAfterLoad()` helper** — Shared load-wait + inject pattern used by both navigate and create-tab paths
-- **`togglePicker()` function** — Single entry point for popup button and keyboard shortcut, routes through background script with automatic content script injection
+- **Session-chooser command** — Single entry point for the toolbar button and keyboard shortcut, routed through the background script with automatic content-script injection
 
 ### Changed
 - **Popup button simplified** — Routes through background script instead of injecting directly, eliminating duplicated injection logic

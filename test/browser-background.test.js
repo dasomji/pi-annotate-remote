@@ -12,6 +12,9 @@ const ANNOTATOR_SCRIPT_FILES = [
   "content-draft.js",
   "content-etch.js",
   "content-route-guard.js",
+  "content-navigation.js",
+  "content-run.js",
+  "content-dialogs.js",
   "content.js",
 ];
 const TARGET_TAB = {
@@ -42,7 +45,7 @@ function createHarness({
   targetTab = TARGET_TAB,
   failPositionedWindow = false,
   failSizedWindow = false,
-  pickerMessageFailures = 0,
+  chooserMessageFailures = 0,
 } = {}) {
   const storage = {};
   const sessionStorage = {};
@@ -138,8 +141,8 @@ function createHarness({
         return tab;
       },
       async sendMessage(tabId, message) {
-        if (message?.type === "OPEN_PICKER" && pickerMessageFailures > 0) {
-          pickerMessageFailures -= 1;
+        if (message?.type === "OPEN_SESSION_CHOOSER" && chooserMessageFailures > 0) {
+          chooserMessageFailures -= 1;
           throw new Error("Receiving end does not exist");
         }
         if (failFirstTabMessage) {
@@ -147,7 +150,7 @@ function createHarness({
           throw new Error("Receiving end does not exist");
         }
         tabMessages.push(JSON.parse(JSON.stringify({ tabId, message })));
-        if (message?.type === "OPEN_PICKER") return { opened: true };
+        if (message?.type === "OPEN_SESSION_CHOOSER") return { opened: true };
         if (message?.type === "START_ANNOTATION" && injected.some((entry) => entry.files?.includes("content.js"))) {
           return { started: true };
         }
@@ -321,12 +324,12 @@ test("background stores broker config and lists only validated sessions", async 
   assert.equal(options.headers.Authorization, "Bearer secret-token");
 });
 
-test("in-page picker status never exposes broker credentials", async () => {
+test("in-page Session chooser status never exposes broker credentials", async () => {
   const harness = createHarness();
-  assert.deepEqual(await harness.send({ type: "GET_PICKER_STATUS" }), { configured: false });
+  assert.deepEqual(await harness.send({ type: "GET_SESSION_CHOOSER_STATUS" }), { configured: false });
 
   await configure(harness);
-  assert.deepEqual(await harness.send({ type: "GET_PICKER_STATUS" }), { configured: true });
+  assert.deepEqual(await harness.send({ type: "GET_SESSION_CHOOSER_STATUS" }), { configured: true });
 });
 
 test("broker config with the bearer token is served only to trusted extension pages", async () => {
@@ -335,7 +338,7 @@ test("broker config with the bearer token is served only to trusted extension pa
 
   const trusted = await harness.send({ type: "GET_BROKER_CONFIG" }, {
     id: EXTENSION_ID,
-    url: `chrome-extension://${EXTENSION_ID}/popup.html`,
+    url: `chrome-extension://${EXTENSION_ID}/session-chooser-window.html`,
   });
   assert.deepEqual(trusted, {
     endpoint: "https://workstation.example.ts.net",
@@ -363,48 +366,48 @@ test("background rejects insecure remote endpoints", async () => {
   assert.deepEqual(harness.storage, {});
 });
 
-test("toolbar action and keyboard command open the picker as a dialog in the active page", async () => {
+test("toolbar action and keyboard command open the Session chooser as a dialog in the active page", async () => {
   const harness = createHarness();
 
   await harness.triggerAction();
   assert.deepEqual(harness.createdWindows, []);
   assert.deepEqual(harness.tabMessages, [{
     tabId: 7,
-    message: { type: "OPEN_PICKER" },
+    message: { type: "OPEN_SESSION_CHOOSER" },
   }]);
-  assert.deepEqual(harness.sessionStorage.pickerState, {
+  assert.deepEqual(harness.sessionStorage.sessionChooserState, {
     targetTabId: 7,
     targetWindowId: 3,
     baseOrigin: "https://example.test",
     modalTabId: 7,
     windowId: null,
-    pickerTabId: null,
+    chooserTabId: null,
   });
 
-  await harness.triggerCommand("toggle-picker");
+  await harness.triggerCommand("toggle-session-chooser");
   assert.equal(harness.createdWindows.length, 0);
   assert.deepEqual(harness.tabMessages.at(-1), {
     tabId: 7,
-    message: { type: "OPEN_PICKER" },
+    message: { type: "OPEN_SESSION_CHOOSER" },
   });
 });
 
-test("picker dialog script is injected on demand", async () => {
-  const harness = createHarness({ pickerMessageFailures: 1 });
+test("Session chooser dialog script is injected on demand", async () => {
+  const harness = createHarness({ chooserMessageFailures: 1 });
 
   await harness.triggerAction();
-  assert.deepEqual(harness.injected, [{ target: { tabId: 7 }, files: ["picker.js"] }]);
-  assert.deepEqual(harness.tabMessages, [{ tabId: 7, message: { type: "OPEN_PICKER" } }]);
+  assert.deepEqual(harness.injected, [{ target: { tabId: 7 }, files: ["session-chooser.js"] }]);
+  assert.deepEqual(harness.tabMessages, [{ tabId: 7, message: { type: "OPEN_SESSION_CHOOSER" } }]);
   assert.deepEqual(harness.createdWindows, []);
 });
 
 test("uninjectable pages fall back to a smaller centered extension window", async () => {
-  const harness = createHarness({ pickerMessageFailures: 2 });
+  const harness = createHarness({ chooserMessageFailures: 2 });
 
   await harness.triggerAction();
   assert.deepEqual(harness.createdWindows, [{
     type: "popup",
-    url: `chrome-extension://${EXTENSION_ID}/popup.html`,
+    url: `chrome-extension://${EXTENSION_ID}/session-chooser-window.html`,
     focused: true,
     width: 420,
     height: 560,
@@ -414,7 +417,7 @@ test("uninjectable pages fall back to a smaller centered extension window", asyn
 });
 
 test("repeated fallback opens reuse the existing compact window", async () => {
-  const harness = createHarness({ pickerMessageFailures: 4 });
+  const harness = createHarness({ chooserMessageFailures: 4 });
 
   await harness.triggerAction();
   await harness.triggerAction();
@@ -424,25 +427,25 @@ test("repeated fallback opens reuse the existing compact window", async () => {
 });
 
 test("opening an in-page dialog closes a previous fallback window", async () => {
-  const harness = createHarness({ pickerMessageFailures: 2 });
+  const harness = createHarness({ chooserMessageFailures: 2 });
 
   await harness.triggerAction();
   assert.equal(harness.createdWindows.length, 1);
   await harness.triggerAction();
 
   assert.deepEqual(harness.removedWindows, [10]);
-  assert.deepEqual(harness.tabMessages.at(-1), { tabId: 7, message: { type: "OPEN_PICKER" } });
-  assert.equal(harness.sessionStorage.pickerState.modalTabId, 7);
-  assert.equal(harness.sessionStorage.pickerState.windowId, null);
+  assert.deepEqual(harness.tabMessages.at(-1), { tabId: 7, message: { type: "OPEN_SESSION_CHOOSER" } });
+  assert.equal(harness.sessionStorage.sessionChooserState.modalTabId, 7);
+  assert.equal(harness.sessionStorage.sessionChooserState.windowId, null);
 });
 
 test("fallback window still opens when Chrome rejects the calculated centered bounds", async () => {
-  const harness = createHarness({ pickerMessageFailures: 2, failPositionedWindow: true });
+  const harness = createHarness({ chooserMessageFailures: 2, failPositionedWindow: true });
 
   await harness.triggerAction();
   assert.deepEqual(harness.createdWindows, [{
     type: "popup",
-    url: `chrome-extension://${EXTENSION_ID}/popup.html`,
+    url: `chrome-extension://${EXTENSION_ID}/session-chooser-window.html`,
     focused: true,
     width: 420,
     height: 560,
@@ -451,7 +454,7 @@ test("fallback window still opens when Chrome rejects the calculated centered bo
 
 test("fallback never asks Chrome for a near-full browser-sized window", async () => {
   const harness = createHarness({
-    pickerMessageFailures: 2,
+    chooserMessageFailures: 2,
     failPositionedWindow: true,
     failSizedWindow: true,
   });
@@ -462,10 +465,10 @@ test("fallback never asks Chrome for a near-full browser-sized window", async ()
 
 test("in-page connection settings open the compact fallback directly on its settings panel", async () => {
   const harness = createHarness();
-  const response = await harness.send({ type: "OPEN_PICKER_SETTINGS" }, { tab: TARGET_TAB });
+  const response = await harness.send({ type: "OPEN_SESSION_CHOOSER_SETTINGS" }, { tab: TARGET_TAB });
 
   assert.equal(response.windowId, 10);
-  assert.equal(harness.createdWindows[0].url, `chrome-extension://${EXTENSION_ID}/popup.html?settings=1`);
+  assert.equal(harness.createdWindows[0].url, `chrome-extension://${EXTENSION_ID}/session-chooser-window.html?settings=1`);
   assert.equal(harness.createdWindows[0].width, 420);
   assert.equal(harness.createdWindows[0].height, 560);
 });
@@ -474,10 +477,10 @@ test("a settings-window failure leaves the in-page chooser open", async () => {
   const harness = createHarness({ failPositionedWindow: true, failSizedWindow: true });
   await harness.triggerAction();
 
-  const response = await harness.send({ type: "OPEN_PICKER_SETTINGS" }, { tab: TARGET_TAB });
+  const response = await harness.send({ type: "OPEN_SESSION_CHOOSER_SETTINGS" }, { tab: TARGET_TAB });
 
   assert.match(response.error, /Invalid value for bounds/);
-  assert.deepEqual(harness.tabMessages, [{ tabId: 7, message: { type: "OPEN_PICKER" } }]);
+  assert.deepEqual(harness.tabMessages, [{ tabId: 7, message: { type: "OPEN_SESSION_CHOOSER" } }]);
 });
 
 test("shortcut settings open in the normal browser window", async () => {
@@ -521,7 +524,7 @@ test("starting annotation targets the remembered page and records its origin rec
   assert.deepEqual(response, { started: true, baseOrigin: "https://example.test" });
   assert.deepEqual(harness.injected, [{ target: { tabId: 7 }, files: ANNOTATOR_SCRIPT_FILES }]);
   assert.deepEqual(harness.tabMessages, [
-    { tabId: 7, message: { type: "OPEN_PICKER" } },
+    { tabId: 7, message: { type: "OPEN_SESSION_CHOOSER" } },
     {
       tabId: 7,
       message: { type: "START_ANNOTATION", sessionId: "session_abcdefghijkl" },
@@ -610,7 +613,7 @@ test("annotation delivery returns a bounded retryable error when the broker reje
   assert.equal(response.delivered, undefined);
 });
 
-test("external tailnet pairing requests open a trusted extension confirmation page", async () => {
+test("external broker pairing requests open a trusted extension confirmation page", async () => {
   const harness = createHarness();
   const code = "a".repeat(43);
 
@@ -637,7 +640,7 @@ test("external tailnet pairing requests open a trusted extension confirmation pa
   }, {
     url: `https://malicious.example/pair#${code}`,
   });
-  assert.match(rejected.error, /trusted Tailscale pairing page/);
+  assert.match(rejected.error, /trusted broker pairing page/);
   assert.equal(harness.createdTabs.length, 1);
 });
 

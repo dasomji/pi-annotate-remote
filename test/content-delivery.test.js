@@ -12,6 +12,9 @@ const ANNOTATOR_SCRIPT_FILES = [
   "content-draft.js",
   "content-etch.js",
   "content-route-guard.js",
+  "content-navigation.js",
+  "content-run.js",
+  "content-dialogs.js",
   "content.js",
 ];
 const annotatorSources = ANNOTATOR_SCRIPT_FILES.map((file) => ({

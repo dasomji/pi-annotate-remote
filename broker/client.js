@@ -168,6 +168,7 @@ export class AnnotationSessionClient {
     this.enabled = false;
     this.registered = false;
     this.connecting = null;
+    this.annotationQueue = Promise.resolve();
     this.reconnectTimer = null;
     this.reconnectDelayMs = 250;
   }
@@ -268,7 +269,7 @@ export class AnnotationSessionClient {
               resolve();
             }
           } else if (message?.type === "annotation" && typeof message.deliveryId === "string") {
-            void this.handleAnnotation(socket, message);
+            this.enqueueAnnotation(socket, message);
           } else if (message?.type === "error") {
             const error = new Error(`Broker rejected session: ${message.code || "unknown error"}`);
             if (!settled) failInitialConnection(error);
@@ -312,6 +313,22 @@ export class AnnotationSessionClient {
         socket.write(`${JSON.stringify({ type: "ack", deliveryId: message.deliveryId, ok: false })}\n`);
       }
     }
+  }
+
+  enqueueAnnotation(socket, message) {
+    // Formatting and Pi follow-up delivery may be asynchronous. Chain the
+    // complete handling transaction so later broker arrivals cannot overtake
+    // earlier annotations or receive an acknowledgement first.
+    this.annotationQueue = this.annotationQueue
+      .then(() => this.handleAnnotation(socket, message))
+      .catch((error) => {
+        const reason = error instanceof Error ? error.message : String(error);
+        try {
+          this.onStatus(`Annotation queue failed: ${reason}`);
+        } catch {
+          // Status reporting must not poison the serial delivery chain.
+        }
+      });
   }
 
   scheduleReconnect() {

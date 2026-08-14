@@ -298,16 +298,17 @@
       });
     }
 
-    function beginElementCapture({ id, sourceNode, metadata, cropRect = metadata?.rect, url, viewport }) {
-      if (typeof id !== "string" || !sourceNode || !metadata || typeof url !== "string" || !viewport) {
-        throw new TypeError("Element capture requires an annotation ID, source node, metadata, URL, and viewport");
+    function beginElementCapture({ id, sourceNode, cropRect, url, viewport }) {
+      if (typeof id !== "string" || !sourceNode || !cropRect || typeof url !== "string" || !viewport) {
+        throw new TypeError("Element capture requires an annotation ID, source node, crop rectangle, URL, and viewport");
       }
+      const found = locateElement(id);
+      if (!found || found.element.deleted) return { status: "step-closed" };
+      const metadata = found.element.metadata;
       if (capture?.state === "capturing") return { status: "busy" };
       if (capture?.state === "failed") {
         return beginRetarget({ id, sourceNode, metadata, cropRect, url, viewport });
       }
-      const found = locateElement(id);
-      if (!found || found.element.deleted) return { status: "step-closed" };
       return createCaptureTransaction({
         id,
         retargetId: id,
@@ -357,6 +358,8 @@
         }
         found.element.sourceNode = transaction.sourceNode;
         found.element.historical = transaction.sourceNode.isConnected === false;
+        // Metadata is frozen when the target is accepted (initial click or an
+        // explicit retarget). Send-time capture contributes images only.
         found.element.metadata = clone(transaction.metadata);
         found.element.cropImage = clone(cropImage);
         found.element.capturePending = false;

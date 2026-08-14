@@ -1,4 +1,4 @@
-// Pi Annotate - Compact fallback session chooser and settings
+// Pi Annotate - compact fallback Session chooser and settings.
 
 const endpointInput = document.getElementById("broker-endpoint");
 const tokenInput = document.getElementById("broker-token");
@@ -202,7 +202,7 @@ async function refreshSessions() {
 async function loadShortcut() {
   try {
     const commands = await chrome.commands.getAll();
-    const command = commands.find((candidate) => candidate.name === "toggle-picker");
+    const command = commands.find((candidate) => candidate.name === "toggle-session-chooser");
     const shortcut = command?.shortcut || "Not set";
     shortcutKey.textContent = shortcut;
     shortcutKey.classList.toggle("unassigned", !command?.shortcut);
@@ -284,9 +284,9 @@ startButton.addEventListener("click", async () => {
 });
 
 chrome.runtime.onMessage.addListener((message) => {
-  if (message?.type === "PICKER_CONTEXT_UPDATED") {
+  if (message?.type === "SESSION_CHOOSER_CONTEXT_UPDATED") {
     refreshSessions();
-  } else if (message?.type === "OPEN_PICKER_SETTINGS_PANEL") {
+  } else if (message?.type === "OPEN_SESSION_CHOOSER_SETTINGS_PANEL") {
     setSettingsOpen(true);
   }
   return false;

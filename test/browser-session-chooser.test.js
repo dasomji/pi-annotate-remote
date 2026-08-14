@@ -3,9 +3,9 @@ import { readFileSync } from "node:fs";
 import test from "node:test";
 import vm from "node:vm";
 
-const pickerSource = readFileSync(new URL("../chrome-extension/picker.js", import.meta.url), "utf8");
+const chooserSource = readFileSync(new URL("../chrome-extension/session-chooser.js", import.meta.url), "utf8");
 
-class PickerElement {
+class ChooserElement {
   constructor(tagName = "div", root = null) {
     this.tagName = tagName.toUpperCase();
     this.root = root;
@@ -53,7 +53,7 @@ class PickerElement {
   focus() { if (this.root) this.root.activeElement = this; }
   remove() { this.isConnected = false; }
   attachShadow() {
-    this.shadow = new PickerShadow();
+    this.shadow = new ChooserShadow();
     return this.shadow;
   }
   async trigger(type, overrides = {}) {
@@ -69,20 +69,20 @@ class PickerElement {
   }
 }
 
-class PickerShadow {
+class ChooserShadow {
   constructor() {
     this.elements = new Map();
     this.listeners = new Map();
     this.activeElement = null;
     this.markup = "";
-    this.backdrop = new PickerElement("div", this);
+    this.backdrop = new ChooserElement("div", this);
     this.backdrop.className = "backdrop";
   }
   set innerHTML(value) {
     this.markup = value;
     const pattern = /<(button|span|div|p|section)[^>]*\sid="([^"]+)"[^>]*>/g;
     for (const match of value.matchAll(pattern)) {
-      const element = new PickerElement(match[1], this);
+      const element = new ChooserElement(match[1], this);
       element.id = match[2];
       const className = match[0].match(/\sclass="([^"]+)"/)?.[1] || "";
       element.className = className;
@@ -115,18 +115,18 @@ async function flushAsync() {
   await new Promise((resolve) => setImmediate(resolve));
 }
 
-function createPickerHarness({ configured = true } = {}) {
+function createChooserHarness({ configured = true } = {}) {
   const messages = [];
   let runtimeListener;
   let appendedHost = null;
   let latestShadow = null;
-  const previousFocus = new PickerElement("button");
+  const previousFocus = new ChooserElement("button");
   let focusRestored = false;
   previousFocus.focus = () => { focusRestored = true; };
 
   const document = {
     activeElement: previousFocus,
-    createElement(tagName) { return new PickerElement(tagName, latestShadow); },
+    createElement(tagName) { return new ChooserElement(tagName, latestShadow); },
     documentElement: {
       appendChild(host) {
         host.isConnected = true;
@@ -146,7 +146,7 @@ function createPickerHarness({ configured = true } = {}) {
       async sendMessage(message) {
         messages.push(JSON.parse(JSON.stringify(message)));
         switch (message.type) {
-          case "GET_PICKER_STATUS":
+          case "GET_SESSION_CHOOSER_STATUS":
             return { configured };
           case "LIST_SESSIONS":
             return {
@@ -162,9 +162,9 @@ function createPickerHarness({ configured = true } = {}) {
             return { selectedSessionId: message.sessionId };
           case "START_ANNOTATION":
             return { started: true };
-          case "OPEN_PICKER_SETTINGS":
+          case "OPEN_SESSION_CHOOSER_SETTINGS":
             return { windowId: 10 };
-          case "PICKER_CLOSED":
+          case "SESSION_CHOOSER_CLOSED":
             return { closed: true };
           default:
             return {};
@@ -182,7 +182,7 @@ function createPickerHarness({ configured = true } = {}) {
     console,
     document,
   });
-  vm.runInContext(pickerSource, context, { filename: "picker.js" });
+  vm.runInContext(chooserSource, context, { filename: "session-chooser.js" });
 
   function deliver(message) {
     let response;
@@ -201,13 +201,13 @@ function createPickerHarness({ configured = true } = {}) {
   };
 }
 
-test("in-page picker is a compact modal with recommended session preselected", async () => {
-  const harness = createPickerHarness();
+test("in-page Session chooser is a compact modal with recommended session preselected", async () => {
+  const harness = createChooserHarness();
 
-  assert.deepEqual(harness.deliver({ type: "OPEN_PICKER" }), { opened: true });
+  assert.deepEqual(harness.deliver({ type: "OPEN_SESSION_CHOOSER" }), { opened: true });
   await flushAsync();
 
-  assert.equal(harness.host.id, "pi-annotate-picker-host");
+  assert.equal(harness.host.id, "pi-annotate-session-chooser-host");
   assert.match(harness.shadow.markup, /role="dialog" aria-modal="true"/);
   assert.match(harness.shadow.markup, /width: min\(420px, calc\(100vw - 32px\)\)/);
   assert.match(harness.shadow.markup, /max-height: min\(560px, calc\(100vh - 32px\)\)/);
@@ -224,15 +224,15 @@ test("in-page picker is a compact modal with recommended session preselected", a
   await flushAsync();
   assert.ok(harness.messages.some((message) =>
     message.type === "START_ANNOTATION" && message.sessionId === "session_mnopqrstuvwx"));
-  assert.ok(harness.messages.some((message) => message.type === "PICKER_CLOSED"));
+  assert.ok(harness.messages.some((message) => message.type === "SESSION_CHOOSER_CLOSED"));
   assert.equal(harness.host.isConnected, false);
   assert.equal(harness.wasFocusRestored(), true);
 });
 
 test("unconfigured modal routes connection setup to the compact extension window", async () => {
-  const harness = createPickerHarness({ configured: false });
+  const harness = createChooserHarness({ configured: false });
 
-  harness.deliver({ type: "OPEN_PICKER" });
+  harness.deliver({ type: "OPEN_SESSION_CHOOSER" });
   await flushAsync();
 
   assert.equal(harness.shadow.getElementById("connect").classList.contains("hidden"), false);
@@ -241,6 +241,6 @@ test("unconfigured modal routes connection setup to the compact extension window
 
   await harness.shadow.getElementById("connect").trigger("click");
   await flushAsync();
-  assert.ok(harness.messages.some((message) => message.type === "OPEN_PICKER_SETTINGS"));
+  assert.ok(harness.messages.some((message) => message.type === "OPEN_SESSION_CHOOSER_SETTINGS"));
   assert.equal(harness.host.isConnected, false);
 });

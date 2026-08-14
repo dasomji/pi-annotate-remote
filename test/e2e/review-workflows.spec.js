@@ -470,7 +470,7 @@ test("three screenshot failures name incomplete evidence before explicit degrade
     reason: "screenshot_failure",
     attempts: 3,
   });
-  expect(result.steps[0].elements[0].metadata.text).toBe("Fresh retry state");
+  expect(result.steps[0].elements[0].metadata.text).toBe("State one target");
   expect(result.steps[0].elements[0].metadata.rect.y).toBeGreaterThan(0);
 });
 
