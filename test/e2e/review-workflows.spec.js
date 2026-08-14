@@ -267,6 +267,19 @@ test("Send collapses an Element annotation to its numbered marker and the marker
     .toBe("Keep this comment after collapsing");
 });
 
+test("Command or Control plus Enter sends a focused Element comment", async ({ workflow }) => {
+  const { page } = workflow;
+
+  for (const shortcut of ["Meta+Enter", "Control+Enter"]) {
+    const card = await annotate(page, "#state-one", `Sent with ${shortcut}`);
+    await card.locator(".pi-note-textarea").press(shortcut);
+
+    await expect(card).toBeHidden();
+    await expect(page.getByRole("button", { name: "Open Element annotation 1.1" })).toBeVisible();
+    await page.getByRole("button", { name: "Open Element annotation 1.1" }).click();
+  }
+});
+
 test("the annotator softly rematerializes without a flourish after Send captures the clean page", async ({ workflow }) => {
   const { page } = workflow;
   const card = await annotate(page, "#state-one", "Make the screenshot flash delightful");
@@ -280,7 +293,7 @@ test("the annotator softly rematerializes without a flourish after Send captures
   await expect(page.locator("#pi-panel")).not.toHaveClass(/pi-rematerializing/, { timeout: 1500 });
 });
 
-test("marker numbers remain anchored to their interaction step while other steps are hidden", async ({ workflow }) => {
+test("all numbered markers appear by default after an interaction", async ({ workflow }) => {
   const { page } = workflow;
   await annotate(page, "#state-one", "First comment in step one");
   await annotate(page, "#mutate", "Second comment in step one");
@@ -288,7 +301,7 @@ test("marker numbers remain anchored to their interaction step while other steps
   await openStepMenu(page);
 
   const markers = page.locator("#pi-markers .pi-marker-badge");
-  await expect(markers).toHaveText(["2.1"]);
+  await expect(markers).toHaveText(["1.1", "1.2", "2.1"]);
   await expect(page.getByRole("button", { name: "Open Element annotation 2.1" })).toBeVisible();
 
   await page.getByRole("button", { name: /^Step 1,/ }).click();
@@ -298,7 +311,7 @@ test("marker numbers remain anchored to their interaction step while other steps
   await expect(markers).toHaveText(["1.1", "1.2", "2.1"]);
 });
 
-test("step filtering defaults to the current step and preserves other evidence", async ({ workflow }) => {
+test("step filtering defaults to all after an interaction and preserves other evidence", async ({ workflow }) => {
   const { page } = workflow;
   await annotate(page, "#state-one", "First-step annotation");
   await openStepMenu(page);
@@ -311,10 +324,11 @@ test("step filtering defaults to the current step and preserves other evidence",
   await createSecondStep(page);
 
   await expect(stepButtons).toHaveCount(2);
-  await expect(stepButtons.nth(1)).toHaveAttribute("aria-pressed", "true");
+  await expect(page.getByRole("button", { name: /^All steps/ })).toHaveAttribute("aria-pressed", "true");
+  await expect(stepButtons.nth(1)).toHaveAttribute("aria-pressed", "false");
   await expect(stepButtons.nth(1)).toHaveAttribute("aria-label", "Step 2, 1 element annotations");
-  await expect(page.locator("#pi-markers .pi-marker-badge")).toHaveCount(1);
-  await expect(stepButtons.first().getByLabel("Hidden by step filter")).toBeVisible();
+  await expect(page.locator("#pi-markers .pi-marker-badge")).toHaveCount(2);
+  await expect(page.getByLabel("Hidden by step filter")).toHaveCount(0);
 
   await stepButtons.first().click();
   await expect(stepButtons.first()).toHaveAttribute("aria-pressed", "true");
