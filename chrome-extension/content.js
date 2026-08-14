@@ -286,6 +286,7 @@
 
   function selectElement(sourceNode) {
     if (mode !== "annotating" || operation !== "idle" || modal !== "none") return;
+    const previousStepId = currentResult().steps.at(-1)?.id || null;
     const result = draft.stageElement({
       sourceNode,
       metadata: freezeMetadata(sourceNode),
@@ -306,7 +307,7 @@
       notePosition: null,
       noteOpen: true,
     });
-    stepFilter = result.stepId;
+    stepFilter = previousStepId && result.stepId !== previousStepId ? "all" : result.stepId;
     deliveryConfirmedDegraded = false;
     render();
     createNote(result.id);
@@ -464,7 +465,7 @@
   }
 
   function selectCreatedStep(transaction, result) {
-    if (transaction.createsStep) stepFilter = result.stepId;
+    if (transaction.createsStep) stepFilter = "all";
   }
 
   function finalizeCommittedCapture(result, transaction) {
@@ -874,8 +875,16 @@
     const source = record?.sourceNode;
     const rect = source?.getBoundingClientRect?.() || { right: 24, top: 24 };
     card.style.visibility = "hidden";
-    card.querySelector?.(".pi-note-textarea")?.addEventListener("input", (event) => {
+    const commentField = card.querySelector?.(".pi-note-textarea");
+    commentField?.addEventListener("input", (event) => {
       if (operation === "idle") draft.updateComment(id, event.target.value);
+    });
+    commentField?.addEventListener("keydown", (event) => {
+      if (event.key !== "Enter" || (!event.metaKey && !event.ctrlKey) ||
+          event.repeat || event.isComposing) return;
+      event.preventDefault();
+      event.stopPropagation();
+      void sendNote(id);
     });
     card.querySelector?.(".pi-note-close")?.addEventListener("click", () => deleteRecord(id));
     card.querySelector?.(".pi-note-send")?.addEventListener("click", () => { void sendNote(id); });
