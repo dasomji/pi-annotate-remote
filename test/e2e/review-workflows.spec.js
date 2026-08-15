@@ -517,17 +517,16 @@ test("modal focus is trapped and returns to the invoking control", async ({ work
 
 test("a route attempted during capture waits for the atomic transaction before asking", async ({ workflow }) => {
   const { page, server, captureControl } = workflow;
-  await captureControl.configure({ delayMs: 450 });
+  await captureControl.configure({ hold: true });
 
   await page.locator("#state-one").click();
   await page.getByRole("button", { name: "Send comment" }).click();
-  const captureStatus = page.locator("#pi-capture-status");
-  await expect(captureStatus).toBeVisible();
-  await expect(captureStatus).toHaveText("Capturing element evidence…");
+  await expect.poll(captureControl.count).toBe(1);
   await page.evaluate((destination) => {
     navigation.navigate(destination);
   }, `${server.origin}/destination?source=during-capture`);
   await expect(page).toHaveURL(`${server.origin}/workflow`);
+  await captureControl.release();
 
   const routeDialog = page.getByRole("dialog", { name: /leave|discard/i });
   await expect(routeDialog).toBeVisible();

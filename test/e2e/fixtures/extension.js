@@ -232,28 +232,39 @@ export const test = base.extend({
   },
 
   captureControl: async ({ extensionWorker }, use) => {
-    const configure = async ({ failures = 0, delayMs = 0 } = {}) => {
-      await extensionWorker.evaluate(({ failures, delayMs }) => {
+    const configure = async ({ failures = 0, delayMs = 0, hold = false } = {}) => {
+      await extensionWorker.evaluate(({ failures, delayMs, hold }) => {
         globalThis.__piE2ECaptureOriginal ||= chrome.tabs.captureVisibleTab.bind(chrome.tabs);
-        globalThis.__piE2ECaptureState = { failures, delayMs, count: 0 };
+        globalThis.__piE2ECaptureState = { failures, delayMs, hold, count: 0, pending: [] };
         chrome.tabs.captureVisibleTab = (windowId, options, callback) => {
           const state = globalThis.__piE2ECaptureState;
           state.count += 1;
+          const complete = (dataUrl) => {
+            const deliver = () => setTimeout(() => callback(dataUrl), state.delayMs);
+            if (state.hold) state.pending.push(deliver);
+            else deliver();
+          };
           if (state.failures > 0) {
             state.failures -= 1;
-            setTimeout(() => callback(undefined), state.delayMs);
+            complete(undefined);
             return;
           }
           globalThis.__piE2ECaptureOriginal(windowId, options, (dataUrl) => {
-            setTimeout(() => callback(dataUrl), state.delayMs);
+            complete(dataUrl);
           });
         };
-      }, { failures, delayMs });
+      }, { failures, delayMs, hold });
     };
     const count = () => extensionWorker.evaluate(
       () => globalThis.__piE2ECaptureState?.count || 0,
     );
-    await use({ configure, count });
+    const release = () => extensionWorker.evaluate(() => {
+      const state = globalThis.__piE2ECaptureState;
+      if (!state) return;
+      state.hold = false;
+      for (const deliver of state.pending.splice(0)) deliver();
+    });
+    await use({ configure, count, release });
   },
 
   workflow: async ({ context, extensionWorker, fixtureServer, captureControl }, use) => {
