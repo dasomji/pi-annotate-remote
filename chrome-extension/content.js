@@ -44,6 +44,8 @@
   let failedCapture = null;
   let deliveryError = "";
   let deliveryConfirmedDegraded = false;
+  let sessionRecoveryActive = false;
+  let recoverySessions = [];
   let bubbleDrag = null;
   let noteDrag = null;
   let bubbleDragged = false;
@@ -144,6 +146,11 @@
         <div class="pi-composer-status">
           <span class="pi-capture-status" id="pi-capture-status" role="status" aria-live="polite"></span>
           <div class="pi-delivery-error" id="pi-delivery-error" role="alert" aria-live="assertive" hidden></div>
+          <div class="pi-session-recovery" id="pi-session-recovery" hidden>
+            <label for="pi-session-recovery-select">Send this draft to</label>
+            <select id="pi-session-recovery-select" aria-label="Choose another annotation session"></select>
+            <button class="pi-session-recovery-refresh" id="pi-session-recovery-refresh" type="button">Refresh</button>
+          </div>
         </div>
         <div class="pi-composer-actions">
           <div class="pi-utility-controls">
@@ -188,6 +195,8 @@
     byId("pi-close")?.addEventListener("click", showAbortDialog);
     byId("pi-help")?.addEventListener("click", showHelpDialog);
     byId("pi-submit")?.addEventListener("click", submit);
+    byId("pi-session-recovery-select")?.addEventListener("change", selectRecoverySession);
+    byId("pi-session-recovery-refresh")?.addEventListener("click", refreshSessionRecovery);
     byId("pi-undo")?.addEventListener("click", undoDelete);
     byId("pi-filter-all")?.addEventListener("click", () => setFilter("all"));
     byId("pi-context")?.addEventListener("input", (event) => {
@@ -227,6 +236,8 @@
     failedCapture = null;
     deliveryError = "";
     deliveryConfirmedDegraded = false;
+    sessionRecoveryActive = false;
+    recoverySessions = [];
     clearTransientControllerState();
     byId("pi-context") && (byId("pi-context").value = "");
     byId("pi-etch-mode") && (byId("pi-etch-mode").checked = false);
@@ -657,9 +668,50 @@
       if (!run.settle(operationToken)) return;
       restartEtchAfterDeliveryAttempt();
       setDeliveryError(`Delivery failed: ${errorMessage(error)}`);
-      render();
       await routeGuard.deliverySettled({ acknowledged: false });
+      await detectUnavailableSession();
     }
+  }
+
+  async function detectUnavailableSession() {
+    try {
+      const response = await chrome.runtime.sendMessage({ type: "LIST_SESSIONS" });
+      if (response?.error || !Array.isArray(response?.sessions)) return false;
+      if (response.sessions.some((session) => session?.id === run.sessionId)) return false;
+      recoverySessions = response.sessions.filter((session) =>
+        typeof session?.id === "string" && typeof session?.label === "string");
+      sessionRecoveryActive = true;
+      setDeliveryError(recoverySessions.length
+        ? "The selected annotation session is no longer available. Choose another session below, then retry."
+        : "The selected annotation session is no longer available. Start another annotation session, then refresh.");
+      return true;
+    } catch {
+      return false;
+    }
+  }
+
+  async function refreshSessionRecovery() {
+    const refresh = byId("pi-session-recovery-refresh");
+    if (refresh) refresh.disabled = true;
+    await detectUnavailableSession();
+    render();
+  }
+
+  async function selectRecoverySession(event) {
+    const sessionId = event.target.value;
+    if (!sessionId) return;
+    event.target.disabled = true;
+    try {
+      const response = await chrome.runtime.sendMessage({ type: "SELECT_SESSION", sessionId });
+      if (response?.error) throw new Error(response.error);
+      if (!run.retarget(sessionId)) throw new Error("The annotation session could not be changed");
+      sessionRecoveryActive = false;
+      recoverySessions = [];
+      setDeliveryError("Annotation session changed. Retry to send this draft.");
+    } catch (error) {
+      setDeliveryError(`Could not change annotation session: ${errorMessage(error)}`);
+    }
+    render();
   }
 
   function restartEtchAfterDeliveryAttempt() {
@@ -727,6 +779,26 @@
     if (error) {
       error.textContent = deliveryError;
       error.hidden = !deliveryError;
+      error.classList.toggle("pi-warning", sessionRecoveryActive);
+    }
+    const recovery = byId("pi-session-recovery");
+    const recoverySelect = byId("pi-session-recovery-select");
+    const recoveryRefresh = byId("pi-session-recovery-refresh");
+    if (recovery && recoverySelect && recoveryRefresh) {
+      recovery.hidden = !sessionRecoveryActive;
+      recoverySelect.replaceChildren();
+      const placeholder = document.createElement("option");
+      placeholder.value = "";
+      placeholder.textContent = recoverySessions.length ? "Choose a session…" : "No sessions available";
+      recoverySelect.appendChild(placeholder);
+      for (const session of recoverySessions) {
+        const option = document.createElement("option");
+        option.value = session.id;
+        option.textContent = session.label;
+        recoverySelect.appendChild(option);
+      }
+      recoverySelect.disabled = draftMutationBlocked || !recoverySessions.length;
+      recoveryRefresh.disabled = draftMutationBlocked;
     }
     const evidenceVisible = run.mode === "annotating";
     if (connectorsEl) connectorsEl.style.display = evidenceVisible ? "" : "none";

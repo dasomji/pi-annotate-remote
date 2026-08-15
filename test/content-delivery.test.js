@@ -69,6 +69,7 @@ class FakeElement {
   addEventListener(type, listener) { this.listeners.set(type, listener); }
   removeEventListener(type) { this.listeners.delete(type); }
   appendChild(child) { this.children.push(child); child.parentElement = this; child.isConnected = true; return child; }
+  replaceChildren(...children) { this.children = []; children.forEach((child) => this.appendChild(child)); }
   remove() { this.isConnected = false; }
   setAttribute(name, value) { this[name] = value; }
   removeAttribute(name) { delete this[name]; }
@@ -117,17 +118,24 @@ class FakeElement {
   }
 }
 
-function createHarness() {
+function createHarness({ sessions = null } = {}) {
   const ids = new Map();
   const requiredIds = [
     "pi-close", "pi-cancel", "pi-submit", "pi-minimize", "pi-minimized-bubble",
     "pi-pause", "pi-resume-bubble", "pi-filmstrip", "pi-filter-all", "pi-undo",
     "pi-mode-single", "pi-mode-multi", "pi-ss-each", "pi-ss-full", "pi-ss-none",
     "pi-notes-visible", "pi-debug-mode", "pi-etch-mode", "pi-etch-count", "pi-context",
-    "pi-delivery-error",
+    "pi-delivery-error", "pi-session-recovery", "pi-session-recovery-select",
+    "pi-session-recovery-refresh",
   ];
   for (const id of requiredIds) {
-    const element = new FakeElement(id.includes("mode") || id.includes("ss-") || ["pi-close", "pi-cancel", "pi-submit", "pi-minimize"].includes(id) ? "button" : "div");
+    const tagName = id === "pi-session-recovery-select"
+      ? "select"
+      : id === "pi-session-recovery-refresh" || id.includes("mode") || id.includes("ss-") ||
+        ["pi-close", "pi-cancel", "pi-submit", "pi-minimize"].includes(id)
+        ? "button"
+        : "div";
+    const element = new FakeElement(tagName);
     element.id = id;
     ids.set(id, element);
   }
@@ -164,6 +172,12 @@ function createHarness() {
           return deliveryAttempts === 1
             ? { error: "annotation session disconnected" }
             : { delivered: true };
+        }
+        if (message.type === "LIST_SESSIONS" && sessions) {
+          return { sessions, selectedSessionId: "", recommendedSessionId: "" };
+        }
+        if (message.type === "SELECT_SESSION") {
+          return { selectedSessionId: message.sessionId };
         }
         return {};
       },
@@ -263,6 +277,41 @@ test("content UI stays open with Retry until broker delivery is acknowledged", a
   assert.equal(deliveries.length, 2);
   const panel = harness.document.body.children.find((element) => element.id === "pi-panel");
   assert.equal(panel.isConnected, false);
+});
+
+test("a vanished annotation session warns and lets the draft target another live session", async () => {
+  const replacementSessionId = "session_mnopqrstuvwx";
+  const harness = createHarness({
+    sessions: [{ id: replacementSessionId, label: "shop (main) · Alice" }],
+  });
+  harness.runtimeListener(
+    { type: "START_ANNOTATION", sessionId: "session_abcdefghijkl" },
+    {},
+    () => {},
+  );
+  harness.ids.get("pi-context").value = "Keep this draft intact";
+
+  await harness.ids.get("pi-submit").trigger("click");
+
+  const error = harness.ids.get("pi-delivery-error");
+  const recovery = harness.ids.get("pi-session-recovery");
+  const select = harness.ids.get("pi-session-recovery-select");
+  assert.equal(recovery.hidden, false);
+  assert.match(error.textContent, /selected annotation session is no longer available/i);
+  assert.equal(select.children.length, 2);
+  assert.equal(select.children[1].value, replacementSessionId);
+  assert.equal(select.children[1].textContent, "shop (main) · Alice");
+
+  select.value = replacementSessionId;
+  await select.trigger("change");
+  assert.ok(harness.sentMessages.some((message) =>
+    message.type === "SELECT_SESSION" && message.sessionId === replacementSessionId));
+
+  await harness.ids.get("pi-submit").trigger("click");
+  const deliveries = harness.sentMessages.filter((message) => message.type === "ANNOTATIONS_COMPLETE");
+  assert.equal(deliveries.length, 2);
+  assert.equal(deliveries[1].sessionId, replacementSessionId);
+  assert.equal(deliveries[1].result.context, "Keep this draft intact");
 });
 
 test("Interact with page returns site ownership and Resume annotation restores annotation mode", async () => {

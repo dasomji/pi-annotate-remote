@@ -756,7 +756,7 @@ function gitBranch(cwd: string): string {
   }
 }
 
-function createSessionLabel(cwd = process.cwd()): string {
+export function createSessionBaseLabel(cwd = process.cwd()): string {
   const project = path.basename(cwd) || "project";
   const label = `${project} (${gitBranch(cwd)})`.replace(/[\u0000-\u001f\u007f]/g, " ");
   return label.slice(0, 200);
@@ -766,7 +766,7 @@ export default function (pi: ExtensionAPI) {
   const brokerConfig = getBrokerConfig();
   const daemonPath = fileURLToPath(new URL("./broker/daemon.js", import.meta.url));
   const sessionId = randomUUID();
-  const sessionLabel = createSessionLabel();
+  const sessionBaseLabel = createSessionBaseLabel();
   let annotationClient: AnnotationSessionClient | null = null;
   let brokerToken: string | null = null;
   let currentCtx: AnnotationContext | null = null;
@@ -777,15 +777,19 @@ export default function (pi: ExtensionAPI) {
     currentCtx?.ui?.setStatus?.("pi-annotate", message);
   }
 
+  function currentSessionLabel(): string {
+    return annotationClient?.label || sessionBaseLabel;
+  }
+
   async function enableAnnotationSession(
     ctx: AnnotationContext,
     { refreshServe = false } = {},
-  ): Promise<{ token: string; serve: TailscaleServeInfo }> {
+  ): Promise<{ token: string; serve: TailscaleServeInfo; sessionLabel: string }> {
     currentCtx = ctx;
     if (!annotationClient) {
       annotationClient = new AnnotationSessionClient({
         sessionId,
-        label: sessionLabel,
+        baseLabel: sessionBaseLabel,
         socketPath: brokerConfig.socketPath,
         ensureBroker: async () => {
           brokerToken = await ensureBrokerRunning({ config: brokerConfig, daemonPath });
@@ -810,7 +814,7 @@ export default function (pi: ExtensionAPI) {
         port: brokerConfig.port,
       });
     }
-    return { token: brokerToken, serve: serveInfo };
+    return { token: brokerToken, serve: serveInfo, sessionLabel: currentSessionLabel() };
   }
 
   async function annotateHandler(args: string, ctx: AnnotationContext) {
@@ -819,14 +823,14 @@ export default function (pi: ExtensionAPI) {
 
     if (action === "off") {
       annotationClient?.disable();
-      ctx.ui?.notify?.(`Annotation session disabled: ${sessionLabel}`, "info");
+      ctx.ui?.notify?.(`Annotation session disabled: ${currentSessionLabel()}`, "info");
       return;
     }
 
     if (action === "status") {
       const state = annotationClient?.registered ? "available" : "unavailable";
       const endpoint = serveInfo?.endpoint ? `\nEndpoint: ${serveInfo.endpoint}` : "";
-      ctx.ui?.notify?.(`Annotation session is ${state}: ${sessionLabel}${endpoint}`, "info");
+      ctx.ui?.notify?.(`Annotation session is ${state}: ${currentSessionLabel()}${endpoint}`, "info");
       return;
     }
 
@@ -838,7 +842,7 @@ export default function (pi: ExtensionAPI) {
     try {
       const enabled = await enableAnnotationSession(ctx, { refreshServe: action === "setup" });
       ctx.ui?.notify?.(await createSetupInstructions({
-        sessionLabel,
+        sessionLabel: enabled.sessionLabel,
         token: enabled.token,
         serve: enabled.serve,
       }), "info");
@@ -875,7 +879,7 @@ export default function (pi: ExtensionAPI) {
         const enabled = await enableAnnotationSession(ctx);
         if (!setupShown && ctx.hasUI) {
           ctx.ui.notify(await createSetupInstructions({
-            sessionLabel,
+            sessionLabel: enabled.sessionLabel,
             token: enabled.token,
             serve: enabled.serve,
           }), "info");
@@ -887,11 +891,11 @@ export default function (pi: ExtensionAPI) {
         return {
           content: [{
             type: "text",
-            text: `Annotation session is available as ${sessionLabel}${endpointText}. Select it in the Pi Annotate Session chooser and submit the annotation.`,
+            text: `Annotation session is available as ${enabled.sessionLabel}${endpointText}. Select it in the Pi Annotate Session chooser and submit the annotation.`,
           }],
           details: {
             sessionId,
-            label: sessionLabel,
+            label: enabled.sessionLabel,
             endpoint: enabled.serve.endpoint,
             localEndpoint: enabled.serve.localEndpoint,
             tailscaleWarning: enabled.serve.warning,

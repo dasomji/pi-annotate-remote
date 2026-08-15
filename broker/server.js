@@ -10,11 +10,15 @@ import {
   pairingPageHtml,
 } from "./pairing.js";
 import { BROKER_PROTOCOL_VERSION } from "./protocol.js";
+import {
+  MAX_SESSION_LABEL_LENGTH,
+  chooseAvailableSessionName,
+  formatNamedSessionLabel,
+} from "./session-names.js";
 
 export const DEFAULT_MAX_BODY_BYTES = 32 * 1024 * 1024;
 export const DEFAULT_DELIVERY_TIMEOUT_MS = 10_000;
 const MAX_IPC_LINE_BYTES = 64 * 1024;
-const MAX_LABEL_LENGTH = 200;
 const MAX_PAIRING_BODY_BYTES = 4 * 1024;
 const MAX_ACTIVE_PAIRING_CODES = 32;
 
@@ -80,10 +84,14 @@ function validateRegistration(message) {
   if (typeof message.sessionId !== "string" || !/^[a-zA-Z0-9_-]{16,128}$/.test(message.sessionId)) {
     throw new BrokerError(400, "invalid_session_id", "Session ID is invalid");
   }
-  if (typeof message.label !== "string" || !message.label.trim() || message.label.length > MAX_LABEL_LENGTH) {
+  // Protocol-v2 clients sent `label`; accepting it here lets live older Pi
+  // sessions reconnect after a protocol-v3 broker replaces their daemon.
+  const baseLabel = typeof message.baseLabel === "string" ? message.baseLabel : message.label;
+  if (typeof baseLabel !== "string" || !baseLabel.trim() ||
+      baseLabel.length > MAX_SESSION_LABEL_LENGTH) {
     throw new BrokerError(400, "invalid_session_label", "Session label is invalid");
   }
-  return { id: message.sessionId, label: message.label.trim() };
+  return { id: message.sessionId, baseLabel: baseLabel.trim() };
 }
 
 async function readJsonBody(request, maxBodyBytes) {
@@ -202,14 +210,21 @@ export function createBroker(options) {
       if (existing && existing.socket !== socket) {
         throw new BrokerError(409, "session_conflict", "Session ID is already registered");
       }
+      const activeNames = new Set(Array.from(sessions.values(), (session) => session.name));
+      const name = chooseAvailableSessionName(registration.id, activeNames);
+      if (!name) {
+        throw new BrokerError(503, "session_name_pool_exhausted", "All annotation session names are in use");
+      }
+      const label = formatNamedSessionLabel(registration.baseLabel, name);
       sessions.set(registration.id, {
         id: registration.id,
-        label: registration.label,
+        name,
+        label,
         socket,
         connectedAt: Date.now(),
       });
       socketSessions.set(socket, registration.id);
-      sendIpc(socket, { type: "registered", sessionId: registration.id });
+      sendIpc(socket, { type: "registered", sessionId: registration.id, name, label });
       return;
     }
 

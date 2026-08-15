@@ -663,6 +663,35 @@
 
     .pi-delivery-error[hidden] { display: none; }
 
+    .pi-delivery-error.pi-warning { color: var(--pi-warning); }
+
+    .pi-session-recovery {
+      display: grid;
+      grid-template-columns: minmax(0, 1fr) auto;
+      align-items: center;
+      gap: 6px;
+      color: var(--pi-fg-muted);
+      font-size: 11px;
+    }
+
+    .pi-session-recovery label { grid-column: 1 / -1; }
+
+    .pi-session-recovery[hidden] { display: none; }
+
+    .pi-session-recovery select,
+    .pi-session-recovery-refresh {
+      border: 1px solid var(--pi-border-muted);
+      border-radius: 6px;
+      background: var(--pi-bg-elevated);
+      color: var(--pi-fg);
+      font: inherit;
+      padding: 3px 6px;
+    }
+
+    .pi-session-recovery select { min-width: 0; width: 100%; }
+
+    .pi-session-recovery-refresh { cursor: pointer; }
+
     .pi-buttons { display: flex; flex: none; gap: 8px; }
 
     .pi-btn {

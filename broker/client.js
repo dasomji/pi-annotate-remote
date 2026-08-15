@@ -3,6 +3,7 @@ import net from "node:net";
 import { spawn } from "node:child_process";
 import { getBrokerConfig } from "./config.js";
 import { BROKER_PROTOCOL_VERSION } from "./protocol.js";
+import { MAX_SESSION_LABEL_LENGTH, SESSION_NAMES } from "./session-names.js";
 
 const MAX_INCOMING_BUFFER_BYTES = 34 * 1024 * 1024;
 const START_TIMEOUT_MS = 5_000;
@@ -158,7 +159,9 @@ export async function ensureBrokerRunning({ config = getBrokerConfig(), daemonPa
 export class AnnotationSessionClient {
   constructor(options) {
     this.sessionId = options.sessionId;
-    this.label = options.label;
+    this.baseLabel = options.baseLabel;
+    this.name = null;
+    this.label = options.baseLabel;
     this.socketPath = options.socketPath;
     this.ensureBroker = options.ensureBroker;
     this.onAnnotation = options.onAnnotation;
@@ -176,6 +179,7 @@ export class AnnotationSessionClient {
   async enable() {
     this.enabled = true;
     await this.connect();
+    return { name: this.name, label: this.label };
   }
 
   disable() {
@@ -234,7 +238,7 @@ export class AnnotationSessionClient {
         socket.write(`${JSON.stringify({
           type: "register",
           sessionId: this.sessionId,
-          label: this.label,
+          baseLabel: this.baseLabel,
         })}\n`);
       });
 
@@ -261,9 +265,16 @@ export class AnnotationSessionClient {
 
           if (message?.type === "registered" && message.sessionId === this.sessionId) {
             if (!settled) {
+              if (!SESSION_NAMES.includes(message.name) || typeof message.label !== "string" ||
+                  !message.label.trim() || message.label.length > MAX_SESSION_LABEL_LENGTH) {
+                failInitialConnection(new Error("Broker returned an invalid session registration"));
+                return;
+              }
               settled = true;
               clearTimeout(registrationTimeout);
               socket.off("error", failInitialConnection);
+              this.name = message.name;
+              this.label = message.label.trim();
               this.registered = true;
               this.onStatus(`Available as ${this.label}`);
               resolve();
