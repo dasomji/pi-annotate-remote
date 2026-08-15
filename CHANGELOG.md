@@ -22,6 +22,7 @@ All notable changes to Pi Annotate.
 - Draggable minimized annotation bubble with selection count and no reserved bottom-page space.
 - Accessible three-Escape abort confirmation flow; Escape no longer immediately discards annotation work.
 - Delivery retry state that preserves the content UI until the selected Pi session acknowledges receipt.
+- Live-session recovery after a failed delivery, with a warning and replacement-session selector that preserves the current annotation draft.
 - Automated broker, service-worker, in-page chooser, fallback-window, content-delivery, and interaction-state tests.
 
 ### Changed
@@ -33,7 +34,7 @@ All notable changes to Pi Annotate.
 - The annotation bar is now a rounded floating box with 30px side margins, a 20px bottom margin, and a multiline general-context field.
 - Full screenshot mode is described accurately as the visible viewport rather than the entire scrollable page.
 - Broker host permission is optional and requested for only the configured hostname. Remote brokers require HTTPS; localhost HTTP remains available for same-machine use.
-- Pi sessions are labelled with project directory and Git branch while routing uses a random opaque ID.
+- Pi sessions are labelled with project directory, Git branch, and a broker-assigned human name that is unique among live sessions; routing still uses a random opaque ID.
 
 ### Changed (internal)
 - Split annotation-run lifecycle, exact navigation replay, and dialog presentation out of the page controller, with generation guards preventing stale async work from mutating a later run.

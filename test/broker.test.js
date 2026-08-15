@@ -93,8 +93,13 @@ function createLineClient(socketPath) {
 
 async function registerSession(socketPath, sessionId, label) {
   const client = await createLineClient(socketPath);
-  client.send({ type: "register", sessionId, label });
-  assert.deepEqual(await client.next(), { type: "registered", sessionId });
+  client.send({ type: "register", sessionId, baseLabel: label });
+  const registration = await client.next();
+  assert.equal(registration.type, "registered");
+  assert.equal(registration.sessionId, sessionId);
+  assert.equal(typeof registration.name, "string");
+  assert.equal(registration.label, `${label} · ${registration.name}`);
+  client.registration = registration;
   return client;
 }
 
@@ -230,7 +235,7 @@ test("replaces a detached broker that uses an older protocol", async (t) => {
   assert.equal(token, "o".repeat(64));
   assert.deepEqual(await responseJson(await fetch(`http://127.0.0.1:${port}/health`)), {
     status: 200,
-    body: { ok: true, protocolVersion: 2 },
+    body: { ok: true, protocolVersion: 3 },
   });
 });
 
@@ -239,7 +244,7 @@ test("health is public while annotation sessions require bearer authentication",
 
   assert.deepEqual(await responseJson(await fetch(`${baseUrl}/health`)), {
     status: 200,
-    body: { ok: true, protocolVersion: 2 },
+    body: { ok: true, protocolVersion: 3 },
   });
   assert.deepEqual(await responseJson(await fetch(`${baseUrl}/v1/sessions`)), {
     status: 401,
@@ -250,20 +255,41 @@ test("health is public while annotation sessions require bearer authentication",
 test("lists multiple live annotation sessions without private metadata", async (t) => {
   const { address, baseUrl } = await startBroker(t);
   const first = await registerSession(address.socketPath, "session_abcdefghijkl", "alpha (main)");
-  const second = await registerSession(address.socketPath, "session_mnopqrstuvwx", "beta (feature)");
+  const second = await registerSession(address.socketPath, "session_mnopqrstuvwx", "alpha (main)");
   t.after(() => Promise.all([first.close(), second.close()]));
+
+  assert.notEqual(first.registration.name, second.registration.name);
+  const expectedSessions = [
+    { id: "session_abcdefghijkl", label: first.registration.label },
+    { id: "session_mnopqrstuvwx", label: second.registration.label },
+  ].sort((left, right) => left.label.localeCompare(right.label) || left.id.localeCompare(right.id));
 
   assert.deepEqual(await responseJson(await fetch(`${baseUrl}/v1/sessions`, {
     headers: authorizedHeaders(),
   })), {
     status: 200,
     body: {
-      sessions: [
-        { id: "session_abcdefghijkl", label: "alpha (main)" },
-        { id: "session_mnopqrstuvwx", label: "beta (feature)" },
-      ],
+      sessions: expectedSessions,
     },
   });
+});
+
+test("assigns a human name when an older client reconnects with a v2 label", async (t) => {
+  const { address } = await startBroker(t);
+  const client = await createLineClient(address.socketPath);
+  t.after(() => client.close());
+
+  client.send({
+    type: "register",
+    sessionId: "session_legacyclient",
+    label: "alpha (main)",
+  });
+  const registration = await client.next();
+
+  assert.equal(registration.type, "registered");
+  assert.equal(registration.sessionId, "session_legacyclient");
+  assert.match(registration.name, /^[A-Z][a-z]+$/);
+  assert.equal(registration.label, `alpha (main) · ${registration.name}`);
 });
 
 test("routes an annotation to exactly one session and waits for its acknowledgement", async (t) => {
@@ -350,17 +376,23 @@ test("rejects malformed and oversized annotation bodies", async (t) => {
 test("Pi client acknowledges only after handling an annotation and unregisters on disable", async (t) => {
   const { address, baseUrl } = await startBroker(t);
   const received = [];
+  const statuses = [];
   const client = new AnnotationSessionClient({
     sessionId: "session_abcdefghijkl",
-    label: "alpha (main)",
+    baseLabel: "alpha (main)",
     socketPath: address.socketPath,
     ensureBroker: async () => TOKEN,
     onAnnotation: async (annotation) => {
       received.push(annotation);
     },
+    onStatus: (status) => statuses.push(status),
   });
   t.after(() => client.disable());
-  await client.enable();
+  const registration = await client.enable();
+  assert.equal(registration.name, client.name);
+  assert.equal(registration.label, client.label);
+  assert.equal(client.label, `alpha (main) · ${client.name}`);
+  assert.ok(statuses.includes(`Available as ${client.label}`));
 
   const annotation = { success: true, url: "https://example.test", elements: [] };
   const response = await fetch(`${baseUrl}/v1/sessions/session_abcdefghijkl/annotations`, {
@@ -381,7 +413,7 @@ test("Pi client rejects delivery when annotation handling fails", async (t) => {
   const { address, baseUrl } = await startBroker(t);
   const client = new AnnotationSessionClient({
     sessionId: "session_abcdefghijkl",
-    label: "alpha (main)",
+    baseLabel: "alpha (main)",
     socketPath: address.socketPath,
     ensureBroker: async () => TOKEN,
     onAnnotation: async () => {
@@ -406,7 +438,7 @@ test("Pi client reconnects and re-registers after its broker socket closes", asy
   const { address, baseUrl } = await startBroker(t);
   const client = new AnnotationSessionClient({
     sessionId: "session_abcdefghijkl",
-    label: "alpha (main)",
+    baseLabel: "alpha (main)",
     socketPath: address.socketPath,
     ensureBroker: async () => TOKEN,
     onAnnotation: async () => {},
@@ -428,7 +460,7 @@ test("Pi client reconnects and re-registers after its broker socket closes", asy
 
   const response = await fetch(`${baseUrl}/v1/sessions`, { headers: authorizedHeaders() });
   assert.deepEqual(await response.json(), {
-    sessions: [{ id: "session_abcdefghijkl", label: "alpha (main)" }],
+    sessions: [{ id: "session_abcdefghijkl", label: client.label }],
   });
 });
 

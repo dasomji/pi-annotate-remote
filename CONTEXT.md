@@ -37,8 +37,12 @@ The rendezvous point that lists available annotation sessions and routes each an
 _Avoid_: Daemon, server, gateway
 
 **Session label**:
-Human-readable project and branch metadata used to choose an annotation session. It is not an identity and may be duplicated.
-_Avoid_: Session name, agent name
+Human-readable project and branch metadata plus a broker-assigned Session name used to choose an annotation session. Its Session name is unique among live annotation sessions, but the label is not an identity.
+_Avoid_: Agent name
+
+**Session name**:
+A memorable human name assigned from the broker's fixed pool when an annotation session registers. No two live annotation sessions share one; disconnected names return to the pool.
+_Avoid_: Agent name, Session ID
 
 **Session ID**:
 An opaque identifier used by the broker to route annotations to one live annotation session.

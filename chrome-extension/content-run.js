@@ -51,6 +51,13 @@
       state = { ...INACTIVE };
     }
 
+    function retarget(sessionId) {
+      if (!state.active || state.operation !== "idle" || state.modal !== "none" ||
+          typeof sessionId !== "string" || !sessionId) return false;
+      state = { ...state, sessionId };
+      return true;
+    }
+
     function canBegin(kind, requiredMode = null) {
       if (!state.active || state.operation !== "idle" || state.modal !== "none") return null;
       if (requiredMode && state.mode !== requiredMode) return null;
@@ -96,6 +103,7 @@
     return Object.freeze({
       start,
       stop,
+      retarget,
       beginCapture: () => canBegin("capturing", "annotating"),
       beginPause: () => canBegin("pausing", "annotating"),
       beginDelivery: () => canBegin("delivering"),
