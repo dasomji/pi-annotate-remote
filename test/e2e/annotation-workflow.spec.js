@@ -45,6 +45,62 @@ test("delivers an atomic schema-v2 screenshot capture through the broker", async
   expect(result.steps[0].viewport.height).toBeGreaterThan(0);
 });
 
+test("click evidence stays frozen until Send and a fresh annotation can start", async ({
+  workflow,
+  extensionWorker,
+}) => {
+  const { page, server, sessionId, captureControl } = workflow;
+  await captureControl.configure();
+
+  const clickTimeRect = await page.locator("#state-one").evaluate((element) => {
+    const rect = element.getBoundingClientRect();
+    return {
+      x: Math.round(rect.x + window.scrollX),
+      y: Math.round(rect.y + window.scrollY),
+      width: Math.round(rect.width),
+      height: Math.round(rect.height),
+    };
+  });
+  await page.locator("#state-one").click();
+  const note = page.locator(".pi-note-card").last();
+  await note.locator(".pi-note-textarea").fill("Frozen click evidence");
+  expect(await captureControl.count()).toBe(0);
+
+  await page.locator("#state-one").evaluate((element) => {
+    element.textContent = "Changed after annotation click";
+    element.style.marginTop = "80px";
+  });
+  expect(await captureControl.count()).toBe(0);
+  await note.getByRole("button", { name: "Send comment" }).click();
+  await expect.poll(() => captureControl.count()).toBe(1);
+  await page.waitForFunction(() => !document.querySelector("#pi-panel")?.classList.contains("pi-busy"));
+
+  await page.locator("#pi-context").fill("First annotation");
+  await submit(page);
+  await expect.poll(() => server.state.annotations.length).toBe(1);
+  expect(server.state.annotations[0].steps[0].elements[0].metadata).toMatchObject({
+    text: "State one target",
+    rect: clickTimeRect,
+  });
+  await expect(page.locator("#pi-panel")).toHaveCount(0);
+
+  const secondStart = await extensionWorker.evaluate(
+    async (selectedSessionId) => startAnnotation(selectedSessionId),
+    sessionId,
+  );
+  expect(secondStart).toMatchObject({ started: true });
+  await expect(page.locator("#pi-panel")).toBeVisible();
+  await expect(page.locator("#pi-context")).toBeEnabled({ timeout: 1_500 });
+
+  await page.locator("#pi-context").fill("Second annotation");
+  await submit(page);
+  await expect.poll(() => server.state.annotations.length).toBe(2);
+  expect(server.state.annotations.map((annotation) => annotation.context)).toEqual([
+    "First annotation",
+    "Second annotation",
+  ]);
+});
+
 test("pause and resume return input to the page without creating empty or reordered steps", async ({ workflow }) => {
   const { page, server } = workflow;
 

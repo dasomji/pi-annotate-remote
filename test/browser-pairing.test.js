@@ -80,7 +80,7 @@ function createPairingHarness({ permissionGranted = true, runtimeResponse } = {}
   };
 }
 
-test("manifest pins a stable extension ID and accepts pairing messages only from tailnet pages", () => {
+test("manifest pins a stable extension ID and accepts pairing from tailnet or loopback pages", () => {
   assert.equal(extensionIdFromKey(manifest.key), EXTENSION_ID);
   assert.deepEqual(manifest.externally_connectable, {
     matches: [
@@ -90,7 +90,7 @@ test("manifest pins a stable extension ID and accepts pairing messages only from
     ],
   });
   assert.equal(manifest.action.default_popup, undefined);
-  assert.match(manifest.commands["toggle-picker"].description, /Open the Pi Annotate session chooser/);
+  assert.match(manifest.commands["toggle-session-chooser"].description, /Open the Pi Annotate session chooser/);
 });
 
 test("pairing confirmation requests access to only the broker host and completes pairing", async () => {

@@ -1,8 +1,8 @@
 (() => {
-  if (globalThis.__piAnnotatePickerInstalled) return;
-  globalThis.__piAnnotatePickerInstalled = true;
+  if (globalThis.__piAnnotateSessionChooserInstalled) return;
+  globalThis.__piAnnotateSessionChooserInstalled = true;
 
-  const HOST_ID = "pi-annotate-picker-host";
+  const HOST_ID = "pi-annotate-session-chooser-host";
   let host = null;
   let shadow = null;
   let previouslyFocused = null;
@@ -218,11 +218,11 @@
       }
     </style>
     <div class="backdrop">
-      <section class="dialog" role="dialog" aria-modal="true" aria-labelledby="picker-title" aria-describedby="status-text">
+      <section class="dialog" role="dialog" aria-modal="true" aria-labelledby="session-chooser-title" aria-describedby="status-text">
         <header class="header">
           <div class="brand">
             <span class="logo" aria-hidden="true">π</span>
-            <span class="title" id="picker-title">Pi Annotate</span>
+            <span class="title" id="session-chooser-title">Pi Annotate</span>
           </div>
           <button class="icon-button" id="refresh" type="button" title="Refresh annotation sessions" aria-label="Refresh annotation sessions">
             <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M20 11a8.1 8.1 0 0 0-15.5-2M4 4v5h5"/><path d="M4 13a8.1 8.1 0 0 0 15.5 2M20 20v-5h-5"/></svg>
@@ -362,7 +362,7 @@
     setRefreshBusy(true);
     setStatus("checking", "Loading available annotation sessions…");
     try {
-      const status = await chrome.runtime.sendMessage({ type: "GET_PICKER_STATUS" });
+      const status = await chrome.runtime.sendMessage({ type: "GET_SESSION_CHOOSER_STATUS" });
       if (sequence !== refreshSequence || !shadow) return;
       if (status?.error) throw new Error(status.error);
       const configured = status?.configured === true;
@@ -409,7 +409,7 @@
     }
   }
 
-  function closePicker({ notify = true } = {}) {
+  function closeSessionChooser({ notify = true } = {}) {
     if (!host) return;
     const oldHost = host;
     host = null;
@@ -420,7 +420,7 @@
       previouslyFocused.focus({ preventScroll: true });
     }
     previouslyFocused = null;
-    if (notify) chrome.runtime.sendMessage({ type: "PICKER_CLOSED" }).catch(() => {});
+    if (notify) chrome.runtime.sendMessage({ type: "SESSION_CHOOSER_CLOSED" }).catch(() => {});
   }
 
   async function openSettings() {
@@ -429,9 +429,9 @@
     if (settings) settings.disabled = true;
     if (connect) connect.disabled = true;
     try {
-      const response = await chrome.runtime.sendMessage({ type: "OPEN_PICKER_SETTINGS" });
+      const response = await chrome.runtime.sendMessage({ type: "OPEN_SESSION_CHOOSER_SETTINGS" });
       if (response?.error) throw new Error(response.error);
-      closePicker({ notify: false });
+      closeSessionChooser({ notify: false });
     } catch (error) {
       setStatus("error", errorMessage(error, "Could not open settings"));
       if (settings) settings.disabled = false;
@@ -450,7 +450,7 @@
         sessionId: selectedSessionId,
       });
       if (response?.error) throw new Error(response.error);
-      closePicker();
+      closeSessionChooser();
     } catch (error) {
       setStatus("error", errorMessage(error, "Could not start annotation"));
       if (shadow) {
@@ -470,7 +470,7 @@
     event.stopPropagation();
     if (event.key === "Escape") {
       event.preventDefault();
-      closePicker();
+      closeSessionChooser();
       return;
     }
     if (event.key !== "Tab") return;
@@ -486,14 +486,14 @@
     }
   }
 
-  function bindPicker() {
-    element("close").addEventListener("click", () => closePicker());
+  function bindSessionChooser() {
+    element("close").addEventListener("click", () => closeSessionChooser());
     element("refresh").addEventListener("click", refreshSessions);
     element("settings").addEventListener("click", openSettings);
     element("connect").addEventListener("click", openSettings);
     element("start").addEventListener("click", startAnnotation);
     shadow.querySelector(".backdrop").addEventListener("click", (event) => {
-      if (event.target.classList.contains("backdrop")) closePicker();
+      if (event.target.classList.contains("backdrop")) closeSessionChooser();
     });
     shadow.addEventListener("keydown", onKeyDown);
     for (const eventName of ["click", "pointerdown", "pointerup", "mousedown", "mouseup"]) {
@@ -501,7 +501,7 @@
     }
   }
 
-  function openPicker() {
+  function openSessionChooser() {
     if (host?.isConnected && shadow) {
       element("close")?.focus({ preventScroll: true });
       refreshSessions();
@@ -528,20 +528,20 @@
     }
     shadow = host.attachShadow({ mode: "closed" });
     shadow.innerHTML = MARKUP;
-    bindPicker();
+    bindSessionChooser();
     (document.documentElement || document.body).appendChild(host);
     element("close")?.focus({ preventScroll: true });
     refreshSessions();
   }
 
   chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
-    if (message?.type === "OPEN_PICKER") {
-      openPicker();
+    if (message?.type === "OPEN_SESSION_CHOOSER") {
+      openSessionChooser();
       sendResponse({ opened: true });
       return false;
     }
-    if (message?.type === "CLOSE_PICKER") {
-      closePicker({ notify: false });
+    if (message?.type === "CLOSE_SESSION_CHOOSER") {
+      closeSessionChooser({ notify: false });
       sendResponse({ closed: true });
       return false;
     }

@@ -1,6 +1,6 @@
 {
   "name": "pi-annotate",
-  "version": "0.4.7",
+  "version": "0.4.8",
   "description": "Visual annotation tool for Pi coding agent with inline note cards",
   "type": "module",
   "author": "Nico Bailon",
@@ -19,7 +19,7 @@
     "test:e2e:headed": "playwright test --headed",
     "test:e2e:debug": "playwright test --debug",
     "install:e2e": "playwright install chromium",
-    "check": "node --check index.ts && node --check broker/*.js && node --check chrome-extension/*.js"
+    "check": "node --check index.ts && node --check broker/*.js && node --check chrome-extension/*.js && node scripts/check-version.js"
   },
   "peerDependencies": {
     "@earendil-works/pi-coding-agent": "*",
@@ -39,6 +39,7 @@
     "types.ts",
     "broker/",
     "chrome-extension/",
+    "scripts/",
     "README.md",
     "CHANGELOG.md",
     "LICENSE"

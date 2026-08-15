@@ -25,11 +25,11 @@ The annotator mode in which page input passes through to the site while the anno
 _Avoid_: Disabled annotation, browsing mode
 
 **Interaction step**:
-An ordered point-in-time page state from one uninterrupted period of Annotation mode, grouping a viewport image with one or more element annotations.
+An ordered page state from one uninterrupted period of Annotation mode, grouping one or more Element annotations. Its representative viewport is the Send-time screenshot retained from the first Element annotation sent in that step.
 _Avoid_: Page, screen, annotation session
 
 **Element annotation**:
-A point-in-time capture of one selected element's context, comment, and cropped image. It remains part of its interaction step even when the source element no longer exists.
+A selected element whose metadata and geometry are frozen when the click or explicit retarget is accepted. Its screenshot and crop are captured later when the comment is sent. It remains part of its Interaction step even when the source element no longer exists.
 _Avoid_: Selection, marker, note
 
 **Broker**:
@@ -57,7 +57,7 @@ The browser extension and in-page interface used to create and submit an annotat
 _Avoid_: Chrome plugin
 
 **Pairing link**:
-A short-lived tailnet HTTPS URL that asks the annotator to connect to one broker. It carries a pairing code in its fragment, never the bearer token.
+A short-lived broker `/pair` URL that asks the annotator to connect to one broker. It uses tailnet HTTPS for remote access or loopback HTTP for same-machine access, and carries a pairing code in its fragment, never the bearer token.
 _Avoid_: Login link, token URL
 
 **Pairing code**:

@@ -65,7 +65,7 @@ In the project session you want to annotate, run:
 Every invocation starts or reconnects the shared localhost broker, configures Tailscale Serve when needed, and prints:
 
 - a pairing link that expires after five minutes;
-- the exact HTTPS endpoint and bearer token as a manual fallback;
+- the exact broker endpoint and bearer token as a manual fallback;
 - the verified Serve route to the local broker.
 
 The default local broker is `http://127.0.0.1:32179`. Pi Annotate exposes it on the same tailnet HTTPS port, producing an endpoint such as:
@@ -87,9 +87,9 @@ Tailscale Serve keeps the broker available only on your tailnet. Do **not** enab
 
 After a successful start, the session chooser remembers that session for the page's origin (scheme, hostname, and port). On the next visit it preselects the live session as **Last used for this site**. The mapping is only a browser-local recommendation; you can always select another session. Browser-owned or otherwise uninjectable pages use a compact extension window instead.
 
-The link contains a one-time pairing code in its URL fragment, not the bearer token. The code is removed from the visible tailnet page immediately, can be exchanged only once, and expires after five minutes. If the link expires or was already used, run `/annotate setup` to create another.
+The link contains a one-time pairing code in its URL fragment, not the bearer token. The code is removed from the visible pairing page immediately, can be exchanged only once, and expires after five minutes. Without Tailscale, `/annotate` prints a loopback pairing link for a browser on the same machine. If the link expires or was already used, run `/annotate setup` to create another.
 
-For manual recovery, open the session chooser’s settings cog. Pi Annotate opens its compact extension-owned settings window; paste the endpoint and token printed under **Manual fallback**, click **Save & connect**, and approve host access. The extension requests optional network access only for the selected hostname. `http://localhost` and `http://127.0.0.1` are accepted for local development; remote endpoints must use HTTPS.
+For manual recovery, open the session chooser’s settings cog. Pi Annotate opens its compact extension-owned settings window; paste the endpoint and token printed under **Manual fallback**, click **Save & connect**, and approve host access. The extension requests optional network access only for the selected hostname. `http://localhost` and `http://127.0.0.1` are accepted for same-machine use; remote endpoints must use HTTPS.
 
 Desktop Chrome and Chromium support this extension flow. Chrome on iOS and Android does not support desktop Chrome extensions, so opening the link there cannot connect Pi Annotate; use a desktop extension-capable browser on the tailnet.
 
@@ -143,7 +143,7 @@ Submission is successful only after the selected Pi session acknowledges it. Whi
 
 **Inline note cards** — Comments remain attached to stable Element annotation IDs. If the exact source node disappears, its frozen evidence remains and is marked **Historical — source element no longer exists**. Deletion is undoable for the lifetime of the draft.
 
-**Screenshots** — Screenshots are mandatory evidence. The first Element annotation in each Interaction step captures the visible viewport, and every Element annotation receives a padded crop derived from that exact same bitmap. Capture is serialized and retried up to three total attempts. Exhausted failures remain explicit missing evidence and require confirmation before submission; they are never silently omitted.
+**Screenshots** — Screenshots are mandatory Send-time evidence. Sending an Element annotation captures the then-visible viewport and derives its padded crop from that bitmap; no screenshot is taken at the earlier selection click. The first Element annotation sent in an Interaction step supplies that step's representative viewport image. Later Element annotations can therefore have crops from later Send-time bitmaps while retaining their own accepted-click metadata. Capture is serialized and retried up to three total attempts. Exhausted failures remain explicit missing evidence and require confirmation before submission; they are never silently omitted.
 
 **Edit capture** — **Etch** records page changes made during Annotation-mode periods only: inline styles, same-origin CSS rules, classes, attributes, text, and DOM structure. Each non-empty period includes before/after visible-viewport screenshots. Interaction-mode mutations are excluded, and cross-origin stylesheets are reported as warnings.
 
@@ -210,14 +210,17 @@ Advanced overrides: `PI_ANNOTATE_PORT`, `PI_ANNOTATE_RUNTIME_DIR`, `PI_ANNOTATE_
 | `broker/pairing.js` | Pairing-link creation, stable annotator identity, and tailnet handoff page |
 | `broker/tailscale.js` | Conflict-safe automatic Tailscale Serve setup and endpoint discovery |
 | `chrome-extension/background.js` | Session-chooser routing, compact fallback window, origin recommendations, credential storage, broker requests, pairing exchange, screenshots, tab injection |
-| `chrome-extension/picker.js` | Centered in-page session chooser, refresh, recommendation, focus management |
+| `chrome-extension/session-chooser.js` | Centered in-page Session chooser, refresh, recommendation, focus management |
 | `chrome-extension/pair.html` / `pair.js` | Trusted broker confirmation and host-permission request |
-| `chrome-extension/popup.html` / `popup.js` | Compact fallback chooser, connection settings, shortcut settings |
-| `chrome-extension/content.js` | Annotator entry point: Element annotation capture, note cards, and annotation UI |
+| `chrome-extension/session-chooser-window.html` / `session-chooser-window.js` | Compact fallback Session chooser, connection settings, shortcut settings |
+| `chrome-extension/content.js` | Annotator entry point and orchestration across draft, capture, lifecycle, navigation, and presentation adapters |
 | `chrome-extension/content-styles.js` | Annotator stylesheet module |
 | `chrome-extension/content-inspect.js` | Element inspection: selectors, box model, accessibility, debug styles |
 | `chrome-extension/content-capture.js` | Screenshot cropping and badge stamping |
 | `chrome-extension/content-etch.js` | Etch edit recording, DOM/CSS diffing, before/after screenshots |
+| `chrome-extension/content-run.js` | Annotation-run lifecycle, legal transitions, and stale async-operation guards |
+| `chrome-extension/content-navigation.js` | Exact form and Navigation API replay descriptors |
+| `chrome-extension/content-dialogs.js` | Annotation dialog DOM, focus return, and focus trapping |
 
 There is no Native Messaging host and no build step.
 

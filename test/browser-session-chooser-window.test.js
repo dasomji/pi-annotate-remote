@@ -3,10 +3,10 @@ import { readFileSync } from "node:fs";
 import test from "node:test";
 import vm from "node:vm";
 
-const popupSource = readFileSync(new URL("../chrome-extension/popup.js", import.meta.url), "utf8");
-const popupMarkup = readFileSync(new URL("../chrome-extension/popup.html", import.meta.url), "utf8");
+const chooserSource = readFileSync(new URL("../chrome-extension/session-chooser-window.js", import.meta.url), "utf8");
+const chooserMarkup = readFileSync(new URL("../chrome-extension/session-chooser-window.html", import.meta.url), "utf8");
 
-class PopupElement {
+class ChooserWindowElement {
   constructor(tagName = "div") {
     this.tagName = tagName.toUpperCase();
     this.value = "";
@@ -52,7 +52,7 @@ async function flushAsync() {
   await new Promise((resolve) => setImmediate(resolve));
 }
 
-function createPopupHarness({
+function createChooserWindowHarness({
   configured = false,
   shortcut = "Ctrl+Shift+P",
   sessions = [{ id: "session_abcdefghijkl", label: "shop (main)" }],
@@ -67,7 +67,7 @@ function createPopupHarness({
     "start-btn", "status-dot", "status-text", "base-origin", "shortcut-key",
     "edit-shortcut",
   ];
-  const elements = new Map(ids.map((id) => [id, new PopupElement()]));
+  const elements = new Map(ids.map((id) => [id, new ChooserWindowElement()]));
   elements.get("settings-panel").classList.add("hidden");
   elements.get("empty-sessions").classList.add("hidden");
   elements.get("settings-btn").setAttribute("aria-expanded", "false");
@@ -81,7 +81,7 @@ function createPopupHarness({
   const chrome = {
     commands: {
       async getAll() {
-        return [{ name: "toggle-picker", shortcut }];
+        return [{ name: "toggle-session-chooser", shortcut }];
       },
     },
     permissions: {
@@ -124,7 +124,7 @@ function createPopupHarness({
 
   const document = {
     getElementById(id) { return elements.get(id) || null; },
-    createElement(tagName) { return new PopupElement(tagName); },
+    createElement(tagName) { return new ChooserWindowElement(tagName); },
   };
   const window = {
     location: { search: settingsRequested ? "?settings=1" : "" },
@@ -132,7 +132,7 @@ function createPopupHarness({
     close() { closed = true; },
   };
 
-  vm.runInContext(popupSource, vm.createContext({
+  vm.runInContext(chooserSource, vm.createContext({
     Error,
     Set,
     URL,
@@ -140,7 +140,7 @@ function createPopupHarness({
     console,
     document,
     window,
-  }), { filename: "popup.js" });
+  }), { filename: "session-chooser-window.js" });
 
   return {
     elements,
@@ -153,13 +153,13 @@ function createPopupHarness({
 }
 
 test("refresh control is a circular icon button", () => {
-  assert.match(popupMarkup, /#refresh-btn\s*\{\s*border-radius:\s*50%;\s*\}/);
-  assert.match(popupMarkup, /id="refresh-btn"[\s\S]*?<svg/);
+  assert.match(chooserMarkup, /#refresh-btn\s*\{\s*border-radius:\s*50%;\s*\}/);
+  assert.match(chooserMarkup, /id="refresh-btn"[\s\S]*?<svg/);
 });
 
-test("connected picker hides settings, recommends by origin, and starts the chosen session", async () => {
+test("connected Session chooser hides settings, recommends by origin, and starts the chosen session", async () => {
   const recommended = "session_mnopqrstuvwx";
-  const harness = createPopupHarness({
+  const harness = createChooserWindowHarness({
     configured: true,
     sessions: [
       { id: "session_abcdefghijkl", label: "shop (main)" },
@@ -191,15 +191,15 @@ test("connected picker hides settings, recommends by origin, and starts the chos
 });
 
 test("settings fallback opens its settings panel even when already configured", async () => {
-  const harness = createPopupHarness({ configured: true, settingsRequested: true });
+  const harness = createChooserWindowHarness({ configured: true, settingsRequested: true });
   await flushAsync();
 
   assert.equal(harness.elements.get("settings-panel").classList.contains("hidden"), false);
   assert.equal(harness.elements.get("settings-btn").getAttribute("aria-expanded"), "true");
 });
 
-test("unconfigured picker exposes connection and Chrome-managed shortcut settings", async () => {
-  const harness = createPopupHarness({ configured: false, shortcut: "" });
+test("unconfigured Session chooser exposes connection and Chrome-managed shortcut settings", async () => {
+  const harness = createChooserWindowHarness({ configured: false, shortcut: "" });
   await flushAsync();
 
   assert.equal(harness.elements.get("settings-panel").classList.contains("hidden"), false);
@@ -223,12 +223,12 @@ test("unconfigured picker exposes connection and Chrome-managed shortcut setting
   assert.ok(harness.messages.some((message) => message.type === "OPEN_SHORTCUT_SETTINGS"));
 });
 
-test("refresh icon reloads sessions when picker context changes", async () => {
-  const harness = createPopupHarness({ configured: true });
+test("refresh icon reloads sessions when Session chooser context changes", async () => {
+  const harness = createChooserWindowHarness({ configured: true });
   await flushAsync();
   const before = harness.messages.filter((message) => message.type === "LIST_SESSIONS").length;
 
-  harness.runtimeListener({ type: "PICKER_CONTEXT_UPDATED" });
+  harness.runtimeListener({ type: "SESSION_CHOOSER_CONTEXT_UPDATED" });
   await flushAsync();
 
   const after = harness.messages.filter((message) => message.type === "LIST_SESSIONS").length;

@@ -281,7 +281,7 @@
     <span class="status-text" id="status-text">Checking connection…</span>
   </div>
 
-  <main id="picker-panel">
+  <main id="session-chooser-panel">
     <section aria-labelledby="sessions-heading">
       <div class="section-heading">
         <h2 id="sessions-heading">Send annotation to</h2>
@@ -299,7 +299,7 @@
       <div class="field">
         <label for="broker-endpoint">Broker endpoint</label>
         <input id="broker-endpoint" type="url" inputmode="url" autocomplete="url" placeholder="https://machine.tailnet.ts.net" required>
-        <p class="hint">Use the HTTPS address printed by <code>/annotate setup</code>.</p>
+        <p class="hint">Use the HTTPS or same-machine loopback address printed by <code>/annotate setup</code>.</p>
       </div>
       <div class="field">
         <label for="broker-token">Broker token</label>
@@ -320,6 +320,6 @@
     <p class="hint">Chrome manages extension shortcuts. The button opens Chrome’s shortcut settings.</p>
   </section>
 
-  <script src="popup.js"></script>
+  <script src="session-chooser-window.js"></script>
 </body>
 </html>

@@ -5,7 +5,7 @@ export const PAIRING_CODE_PATTERN = /^[A-Za-z0-9_-]{43}$/;
 const PAIRING_REQUEST_TIMEOUT_MS = 5_000;
 const MAX_PAIRING_RESPONSE_BYTES = 16 * 1024;
 
-function endpointOrigin(value, { requireTailnet = false } = {}) {
+function endpointOrigin(value, { requirePairingOrigin = false } = {}) {
   let url;
   try {
     url = new URL(value);
@@ -15,10 +15,13 @@ function endpointOrigin(value, { requireTailnet = false } = {}) {
   if (url.username || url.password || url.pathname !== "/" || url.search || url.hash) {
     throw new Error("Pairing endpoint must be an origin");
   }
-  if (requireTailnet && (url.protocol !== "https:" || !url.hostname.endsWith(".ts.net"))) {
-    throw new Error("Public pairing endpoint must use Tailscale HTTPS");
+  const isTailnetHttps = url.protocol === "https:" && url.hostname.endsWith(".ts.net");
+  const isLoopbackHttp = url.protocol === "http:" &&
+    ["localhost", "127.0.0.1"].includes(url.hostname);
+  if (requirePairingOrigin && !isTailnetHttps && !isLoopbackHttp) {
+    throw new Error("Pairing link must use Tailscale HTTPS or same-machine loopback HTTP");
   }
-  if (!requireTailnet && !["http:", "https:"].includes(url.protocol)) {
+  if (!requirePairingOrigin && !["http:", "https:"].includes(url.protocol)) {
     throw new Error("Local pairing endpoint must use HTTP or HTTPS");
   }
   return url.origin;
@@ -32,7 +35,7 @@ export async function createPairingLink({
   timeoutMs = PAIRING_REQUEST_TIMEOUT_MS,
 }) {
   const localOrigin = endpointOrigin(localEndpoint);
-  const publicOrigin = endpointOrigin(publicEndpoint, { requireTailnet: true });
+  const publicOrigin = endpointOrigin(publicEndpoint, { requirePairingOrigin: true });
   if (typeof token !== "string" || !token.trim() || token.length > 4_096) {
     throw new Error("Broker token is invalid");
   }
