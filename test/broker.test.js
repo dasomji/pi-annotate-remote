@@ -112,6 +112,14 @@ async function responseJson(response) {
   return { status: response.status, body };
 }
 
+function createDeferred() {
+  let resolve;
+  const promise = new Promise((resolvePromise) => {
+    resolve = resolvePromise;
+  });
+  return { promise, resolve };
+}
+
 test("auto-starts a detached broker and creates a private bearer token", async (t) => {
   const directory = fs.mkdtempSync(path.join(os.tmpdir(), "pi-annotate-daemon-test-"));
   const env = {
@@ -407,6 +415,67 @@ test("Pi client acknowledges only after handling an annotation and unregisters o
   await new Promise((resolve) => setTimeout(resolve, 10));
   const sessions = await fetch(`${baseUrl}/v1/sessions`, { headers: authorizedHeaders() });
   assert.deepEqual(await sessions.json(), { sessions: [] });
+});
+
+test("Pi client counts queued annotations only until session delivery completes", async (t) => {
+  const { address, baseUrl } = await startBroker(t, { deliveryTimeoutMs: 1_000 });
+  const statuses = [];
+  const firstDeliveryStarted = createDeferred();
+  const secondDeliveryStarted = createDeferred();
+  const twoAnnotationsQueued = createDeferred();
+  const firstDeliveryCompleted = createDeferred();
+  const secondDeliveryCompleted = createDeferred();
+  let deliveryNumber = 0;
+  const client = new AnnotationSessionClient({
+    sessionId: "session_abcdefghijkl",
+    baseLabel: "alpha (main)",
+    socketPath: address.socketPath,
+    ensureBroker: async () => TOKEN,
+    onAnnotation: async () => {
+      deliveryNumber += 1;
+      if (deliveryNumber === 1) {
+        firstDeliveryStarted.resolve();
+        await firstDeliveryCompleted.promise;
+      } else {
+        secondDeliveryStarted.resolve();
+        await secondDeliveryCompleted.promise;
+      }
+    },
+    onStatus: (status) => {
+      statuses.push(status);
+      if (status === "2 annotations queued") twoAnnotationsQueued.resolve();
+    },
+  });
+  t.after(() => {
+    firstDeliveryCompleted.resolve();
+    secondDeliveryCompleted.resolve();
+    client.disable();
+  });
+  await client.enable();
+  const availableStatus = `Available as ${client.label}`;
+  const endpoint = `${baseUrl}/v1/sessions/session_abcdefghijkl/annotations`;
+  const request = (url) => fetch(endpoint, {
+    method: "POST",
+    headers: authorizedHeaders({ "Content-Type": "application/json" }),
+    body: JSON.stringify({ success: true, url, elements: [] }),
+  });
+
+  const firstResponsePromise = request("https://example.test/first");
+  await firstDeliveryStarted.promise;
+  assert.equal(statuses.at(-1), "1 annotation queued");
+
+  const secondResponsePromise = request("https://example.test/second");
+  await twoAnnotationsQueued.promise;
+  assert.equal(statuses.at(-1), "2 annotations queued");
+
+  firstDeliveryCompleted.resolve();
+  assert.equal((await firstResponsePromise).status, 202);
+  await secondDeliveryStarted.promise;
+  assert.equal(statuses.at(-1), "1 annotation queued");
+
+  secondDeliveryCompleted.resolve();
+  assert.equal((await secondResponsePromise).status, 202);
+  assert.equal(statuses.at(-1), availableStatus);
 });
 
 test("Pi client rejects delivery when annotation handling fails", async (t) => {
