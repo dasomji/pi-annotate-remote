@@ -172,6 +172,7 @@ export class AnnotationSessionClient {
     this.registered = false;
     this.connecting = null;
     this.annotationQueue = Promise.resolve();
+    this.pendingAnnotationCount = 0;
     this.reconnectTimer = null;
     this.reconnectDelayMs = 250;
   }
@@ -317,21 +318,39 @@ export class AnnotationSessionClient {
       if (!socket.destroyed) {
         socket.write(`${JSON.stringify({ type: "ack", deliveryId: message.deliveryId, ok: true })}\n`);
       }
+      return true;
     } catch (error) {
       const reason = error instanceof Error ? error.message : String(error);
       this.onStatus(`Annotation rejected: ${reason}`);
       if (!socket.destroyed) {
         socket.write(`${JSON.stringify({ type: "ack", deliveryId: message.deliveryId, ok: false })}\n`);
       }
+      return false;
     }
+  }
+
+  reportAnnotationQueueStatus() {
+    const noun = this.pendingAnnotationCount === 1 ? "annotation" : "annotations";
+    this.onStatus(`${this.pendingAnnotationCount} ${noun} queued`);
   }
 
   enqueueAnnotation(socket, message) {
     // Formatting and Pi follow-up delivery may be asynchronous. Chain the
     // complete handling transaction so later broker arrivals cannot overtake
     // earlier annotations or receive an acknowledgement first.
+    this.pendingAnnotationCount += 1;
+    this.reportAnnotationQueueStatus();
     this.annotationQueue = this.annotationQueue
-      .then(() => this.handleAnnotation(socket, message))
+      .then(async () => {
+        let delivered = false;
+        try {
+          delivered = await this.handleAnnotation(socket, message);
+        } finally {
+          this.pendingAnnotationCount -= 1;
+          if (this.pendingAnnotationCount > 0) this.reportAnnotationQueueStatus();
+          else if (delivered) this.onStatus(`Available as ${this.label}`);
+        }
+      })
       .catch((error) => {
         const reason = error instanceof Error ? error.message : String(error);
         try {

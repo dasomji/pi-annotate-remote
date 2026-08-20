@@ -43,6 +43,7 @@ All notable changes to Pi Annotate.
 - Aligned the extension manifest version with the package version and made the repository check enforce the match.
 
 ### Fixed
+- Counted annotations awaiting handoff to the Pi session and restored the availability footer after delivery, instead of leaving a stale follow-up status.
 - Serialized Pi-side annotation handling so asynchronous formatting cannot reverse broker arrival order.
 - Kept accepted-click metadata and geometry frozen across Send-time screenshot attempts and retries.
 - Reset every annotation-run transient before a second run on the same page, instead of inheriting a completed delivery state.

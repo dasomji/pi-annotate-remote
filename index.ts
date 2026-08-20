@@ -799,8 +799,7 @@ export default function (pi: ExtensionAPI) {
         onAnnotation: async (value: unknown) => {
           if (!isAnnotationResult(value)) throw new Error("Annotation payload is invalid");
           const text = await formatAnnotationResult(value);
-          const disposition = sendAnnotationToPi(pi, text, currentCtx || {});
-          setStatus(disposition === "queued" ? "Annotation queued as follow-up" : "Annotation delivered");
+          sendAnnotationToPi(pi, text, currentCtx || {});
         },
       });
     }
