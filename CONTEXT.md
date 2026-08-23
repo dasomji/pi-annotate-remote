@@ -53,7 +53,7 @@ A browser-local, advisory mapping from a page origin to the annotation session m
 _Avoid_: Project mapping, base URL binding
 
 **Session chooser**:
-The centered, in-page dialog used to select a live annotation session before starting an annotation. A compact extension window is only a fallback for browser-owned or otherwise uninjectable pages and for connection settings.
+The centered, in-page dialog used to select a live annotation session before starting an annotation. It is available only on regular pages that can host the Annotator.
 _Avoid_: Picker, popup window
 
 **Annotator**:

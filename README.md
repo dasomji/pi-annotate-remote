@@ -85,11 +85,11 @@ Tailscale Serve keeps the broker available only on your tailnet. Do **not** enab
 3. Approve Chrome's request for access to that broker host.
 4. Open a normal `http://` or `https://` page, then click the Pi Annotate toolbar icon to open the centered session chooser over that page. Select a live annotation session and click **Start annotation**.
 
-After a successful start, the session chooser remembers that session for the page's origin (scheme, hostname, and port). On the next visit it preselects the live session as **Last used for this site**. The mapping is only a browser-local recommendation; you can always select another session. Browser-owned or otherwise uninjectable pages use a compact extension window instead.
+After a successful start, the session chooser remembers that session for the page's origin (scheme, hostname, and port). On the next visit it preselects the live session as **Last used for this site**. The mapping is only a browser-local recommendation; you can always select another session. The Session chooser opens only on regular pages that can host the Annotator; browser-owned or otherwise uninjectable pages cannot be annotated.
 
 The link contains a one-time pairing code in its URL fragment, not the bearer token. The code is removed from the visible pairing page immediately, can be exchanged only once, and expires after five minutes. Without Tailscale, `/annotate` prints a loopback pairing link for a browser on the same machine. If the link expires or was already used, run `/annotate setup` to create another.
 
-For manual recovery, open the session chooser’s settings cog. Pi Annotate opens its compact extension-owned settings window; paste the endpoint and token printed under **Manual fallback**, click **Save & connect**, and approve host access. The extension requests optional network access only for the selected hostname. `http://localhost` and `http://127.0.0.1` are accepted for same-machine use; remote endpoints must use HTTPS.
+For manual recovery, open the Session chooser’s settings cog. Pi Annotate opens its dedicated extension-owned settings page; paste the endpoint and token printed under **Manual fallback**, click **Save & connect**, and approve host access. The extension requests optional network access only for the selected hostname. `http://localhost` and `http://127.0.0.1` are accepted for same-machine use; remote endpoints must use HTTPS.
 
 Desktop Chrome and Chromium support this extension flow. Chrome on iOS and Android does not support desktop Chrome extensions, so opening the link there cannot connect Pi Annotate; use a desktop extension-capable browser on the tailnet.
 
@@ -182,7 +182,7 @@ Example output:
 - Pairing links contain only a random 256-bit, memory-only code in the URL fragment. The code expires after five minutes, works once, and is exchanged for the token only after extension confirmation.
 - The pairing page addresses one pinned extension ID; the extension validates the page's browser-provided tailnet URL and derives the broker origin from it rather than trusting message data.
 - The token file is mode `0600`; runtime/state directories and local IPC are private to the user.
-- The compact settings window and pairing confirmation request optional host permission for only the configured broker hostname; the in-page session chooser never receives the bearer token.
+- The dedicated settings page and pairing confirmation request optional host permission for only the configured broker hostname; the in-page Session chooser never receives the bearer token.
 - Broker responses expose session `{id, label}` only, not absolute paths or transcript data.
 - Request bodies, local IPC messages, and browser responses are bounded.
 - Screenshot payloads and credentials are never logged by the broker or service worker.
@@ -209,10 +209,10 @@ Advanced overrides: `PI_ANNOTATE_PORT`, `PI_ANNOTATE_RUNTIME_DIR`, `PI_ANNOTATE_
 | `broker/client.js` | Pi session registration, protocol upgrades, and reconnecting local IPC client |
 | `broker/pairing.js` | Pairing-link creation, stable annotator identity, and tailnet handoff page |
 | `broker/tailscale.js` | Conflict-safe automatic Tailscale Serve setup and endpoint discovery |
-| `chrome-extension/background.js` | Session-chooser routing, compact fallback window, origin recommendations, credential storage, broker requests, pairing exchange, screenshots, tab injection |
+| `chrome-extension/background.js` | In-page Session-chooser routing, settings-page opening, origin recommendations, credential storage, broker requests, pairing exchange, screenshots, tab injection |
 | `chrome-extension/session-chooser.js` | Centered in-page Session chooser, refresh, recommendation, focus management |
 | `chrome-extension/pair.html` / `pair.js` | Trusted broker confirmation and host-permission request |
-| `chrome-extension/session-chooser-window.html` / `session-chooser-window.js` | Compact fallback Session chooser, connection settings, shortcut settings |
+| `chrome-extension/settings.html` / `settings.js` | Manual connection recovery and shortcut settings |
 | `chrome-extension/content.js` | Annotator entry point and orchestration across draft, capture, lifecycle, navigation, and presentation adapters |
 | `chrome-extension/content-styles.js` | Annotator stylesheet module |
 | `chrome-extension/content-inspect.js` | Element inspection: selectors, box model, accessibility, debug styles |
@@ -256,7 +256,7 @@ kill "$(cat "$RUNTIME_DIR/broker.lock")"
 | Authentication fails | Run `/annotate setup` and pair again, or paste the current manual fallback token |
 | Delivery fails after annotation | Keep the UI open, refresh the session list if needed, then click **Retry** |
 | Session-chooser shortcut does not work | Open the settings cog, check whether it says **Not set**, then click **Edit shortcut** and assign a non-conflicting key in Chrome |
-| In-page chooser does not appear | Open a normal `http://` or `https://` page. Browser-owned or uninjectable pages use the compact fallback window and cannot be annotated directly |
+| In-page chooser does not appear | Open a normal `http://` or `https://` page. Browser-owned or uninjectable pages cannot host the Session chooser or Annotator |
 | Broker code did not update | Stop the detached broker using the development command above, then run `/annotate` |
 | Browser and Pi are on the same machine | Use `http://127.0.0.1:32179` in connection settings; HTTPS is still required for non-local hosts |
 

@@ -43,8 +43,6 @@ function createStorageArea(values) {
 function createHarness({
   fetchImpl,
   targetTab = TARGET_TAB,
-  failPositionedWindow = false,
-  failSizedWindow = false,
   chooserMessageFailures = 0,
 } = {}) {
   const storage = {};
@@ -53,8 +51,6 @@ function createHarness({
   const tabMessages = [];
   const injected = [];
   const createdTabs = [];
-  const createdWindows = [];
-  const removedWindows = [];
   const windowUpdates = [];
   const runtimeMessages = [];
   const windows = new Map();
@@ -71,12 +67,10 @@ function createHarness({
   windows.set(normalWindow.id, normalWindow);
 
   let nextTabId = 8;
-  let nextWindowId = 10;
   let messageListener;
   let externalMessageListener;
   let commandListener;
   let actionListener;
-  let windowRemovedListener;
   let failFirstTabMessage = false;
 
   const chrome = {
@@ -169,42 +163,12 @@ function createHarness({
         if (!window) throw new Error("No window with id");
         return JSON.parse(JSON.stringify(window));
       },
-      async create(options) {
-        if (
-          (failPositionedWindow && ("left" in options || "top" in options)) ||
-          (failSizedWindow && ("width" in options || "height" in options))
-        ) {
-          throw new Error("Invalid value for bounds");
-        }
-        const window = {
-          id: nextWindowId++,
-          ...JSON.parse(JSON.stringify(options)),
-          tabs: [{
-            id: nextTabId++,
-            active: true,
-            windowId: nextWindowId - 1,
-          }],
-        };
-        createdWindows.push(JSON.parse(JSON.stringify(options)));
-        windows.set(window.id, window);
-        return JSON.parse(JSON.stringify(window));
-      },
       async update(windowId, options) {
         const window = windows.get(windowId);
         if (!window) throw new Error("No window with id");
         Object.assign(window, options);
         windowUpdates.push({ windowId, ...JSON.parse(JSON.stringify(options)) });
         return JSON.parse(JSON.stringify(window));
-      },
-      async remove(windowId) {
-        if (!windows.has(windowId)) throw new Error("No window with id");
-        windows.delete(windowId);
-        removedWindows.push(windowId);
-      },
-      onRemoved: {
-        addListener(listener) {
-          windowRemovedListener = listener;
-        },
       },
     },
     scripting: {
@@ -260,10 +224,8 @@ function createHarness({
 
   return {
     createdTabs,
-    createdWindows,
     fetchCalls,
     injected,
-    removedWindows,
     runtimeMessages,
     send,
     sendExternal,
@@ -279,10 +241,6 @@ function createHarness({
     },
     triggerCommand(command) {
       return commandListener(command);
-    },
-    removeWindow(windowId) {
-      windows.delete(windowId);
-      return windowRemovedListener(windowId);
     },
   };
 }
@@ -338,7 +296,7 @@ test("broker config with the bearer token is served only to trusted extension pa
 
   const trusted = await harness.send({ type: "GET_BROKER_CONFIG" }, {
     id: EXTENSION_ID,
-    url: `chrome-extension://${EXTENSION_ID}/session-chooser-window.html`,
+    url: `chrome-extension://${EXTENSION_ID}/settings.html`,
   });
   assert.deepEqual(trusted, {
     endpoint: "https://workstation.example.ts.net",
@@ -370,7 +328,6 @@ test("toolbar action and keyboard command open the Session chooser as a dialog i
   const harness = createHarness();
 
   await harness.triggerAction();
-  assert.deepEqual(harness.createdWindows, []);
   assert.deepEqual(harness.tabMessages, [{
     tabId: 7,
     message: { type: "OPEN_SESSION_CHOOSER" },
@@ -380,12 +337,9 @@ test("toolbar action and keyboard command open the Session chooser as a dialog i
     targetWindowId: 3,
     baseOrigin: "https://example.test",
     modalTabId: 7,
-    windowId: null,
-    chooserTabId: null,
   });
 
   await harness.triggerCommand("toggle-session-chooser");
-  assert.equal(harness.createdWindows.length, 0);
   assert.deepEqual(harness.tabMessages.at(-1), {
     tabId: 7,
     message: { type: "OPEN_SESSION_CHOOSER" },
@@ -398,89 +352,40 @@ test("Session chooser dialog script is injected on demand", async () => {
   await harness.triggerAction();
   assert.deepEqual(harness.injected, [{ target: { tabId: 7 }, files: ["session-chooser.js"] }]);
   assert.deepEqual(harness.tabMessages, [{ tabId: 7, message: { type: "OPEN_SESSION_CHOOSER" } }]);
-  assert.deepEqual(harness.createdWindows, []);
 });
 
-test("uninjectable pages fall back to a smaller centered extension window", async () => {
+test("uninjectable pages do not open a second Session chooser", async () => {
   const harness = createHarness({ chooserMessageFailures: 2 });
 
   await harness.triggerAction();
-  assert.deepEqual(harness.createdWindows, [{
-    type: "popup",
-    url: `chrome-extension://${EXTENSION_ID}/session-chooser-window.html`,
-    focused: true,
-    width: 420,
-    height: 560,
-    left: 490,
-    top: 220,
-  }]);
+
+  assert.deepEqual(harness.injected, [{ target: { tabId: 7 }, files: ["session-chooser.js"] }]);
+  assert.deepEqual(harness.createdTabs, []);
+  assert.equal(harness.sessionStorage.sessionChooserState.modalTabId, null);
 });
 
-test("repeated fallback opens reuse the existing compact window", async () => {
-  const harness = createHarness({ chooserMessageFailures: 4 });
+test("browser-owned pages do not open or inject a Session chooser", async () => {
+  const restrictedTab = { ...TARGET_TAB, url: "chrome://extensions/" };
+  const harness = createHarness({ targetTab: restrictedTab });
 
-  await harness.triggerAction();
-  await harness.triggerAction();
+  await harness.triggerAction(restrictedTab);
 
-  assert.equal(harness.createdWindows.length, 1);
-  assert.deepEqual(harness.windowUpdates.at(-1), { windowId: 10, focused: true });
+  assert.deepEqual(harness.injected, []);
+  assert.deepEqual(harness.tabMessages, []);
+  assert.deepEqual(harness.createdTabs, []);
 });
 
-test("opening an in-page dialog closes a previous fallback window", async () => {
-  const harness = createHarness({ chooserMessageFailures: 2 });
-
-  await harness.triggerAction();
-  assert.equal(harness.createdWindows.length, 1);
-  await harness.triggerAction();
-
-  assert.deepEqual(harness.removedWindows, [10]);
-  assert.deepEqual(harness.tabMessages.at(-1), { tabId: 7, message: { type: "OPEN_SESSION_CHOOSER" } });
-  assert.equal(harness.sessionStorage.sessionChooserState.modalTabId, 7);
-  assert.equal(harness.sessionStorage.sessionChooserState.windowId, null);
-});
-
-test("fallback window still opens when Chrome rejects the calculated centered bounds", async () => {
-  const harness = createHarness({ chooserMessageFailures: 2, failPositionedWindow: true });
-
-  await harness.triggerAction();
-  assert.deepEqual(harness.createdWindows, [{
-    type: "popup",
-    url: `chrome-extension://${EXTENSION_ID}/session-chooser-window.html`,
-    focused: true,
-    width: 420,
-    height: 560,
-  }]);
-});
-
-test("fallback never asks Chrome for a near-full browser-sized window", async () => {
-  const harness = createHarness({
-    chooserMessageFailures: 2,
-    failPositionedWindow: true,
-    failSizedWindow: true,
-  });
-
-  await harness.triggerAction();
-  assert.deepEqual(harness.createdWindows, []);
-});
-
-test("in-page connection settings open the compact fallback directly on its settings panel", async () => {
+test("in-page connection settings open the dedicated settings page", async () => {
   const harness = createHarness();
-  const response = await harness.send({ type: "OPEN_SESSION_CHOOSER_SETTINGS" }, { tab: TARGET_TAB });
+  const response = await harness.send({ type: "OPEN_SETTINGS" }, { tab: TARGET_TAB });
 
-  assert.equal(response.windowId, 10);
-  assert.equal(harness.createdWindows[0].url, `chrome-extension://${EXTENSION_ID}/session-chooser-window.html?settings=1`);
-  assert.equal(harness.createdWindows[0].width, 420);
-  assert.equal(harness.createdWindows[0].height, 560);
-});
-
-test("a settings-window failure leaves the in-page chooser open", async () => {
-  const harness = createHarness({ failPositionedWindow: true, failSizedWindow: true });
-  await harness.triggerAction();
-
-  const response = await harness.send({ type: "OPEN_SESSION_CHOOSER_SETTINGS" }, { tab: TARGET_TAB });
-
-  assert.match(response.error, /Invalid value for bounds/);
-  assert.deepEqual(harness.tabMessages, [{ tabId: 7, message: { type: "OPEN_SESSION_CHOOSER" } }]);
+  assert.deepEqual(response, { opened: true, tabId: 8 });
+  assert.deepEqual(harness.createdTabs[0], {
+    id: 8,
+    windowId: 3,
+    url: `chrome-extension://${EXTENSION_ID}/settings.html`,
+    active: true,
+  });
 });
 
 test("shortcut settings open in the normal browser window", async () => {

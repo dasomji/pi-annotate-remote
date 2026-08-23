@@ -429,9 +429,9 @@
     if (settings) settings.disabled = true;
     if (connect) connect.disabled = true;
     try {
-      const response = await chrome.runtime.sendMessage({ type: "OPEN_SESSION_CHOOSER_SETTINGS" });
+      const response = await chrome.runtime.sendMessage({ type: "OPEN_SETTINGS" });
       if (response?.error) throw new Error(response.error);
-      closeSessionChooser({ notify: false });
+      closeSessionChooser();
     } catch (error) {
       setStatus("error", errorMessage(error, "Could not open settings"));
       if (settings) settings.disabled = false;
