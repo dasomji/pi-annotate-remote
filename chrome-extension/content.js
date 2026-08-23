@@ -114,8 +114,9 @@
     document.addEventListener("click", onPageClick, true);
     document.addEventListener("wheel", onWheel, { capture: true, passive: false });
     document.addEventListener("keydown", onKeyDown, true);
-    document.addEventListener("mousemove", onDragMove, true);
-    document.addEventListener("mouseup", endBubbleDrag, true);
+    document.addEventListener("pointermove", onDragMove, true);
+    document.addEventListener("pointerup", endDrag, true);
+    document.addEventListener("pointercancel", endDrag, true);
     window.addEventListener("scroll", renderEvidence, true);
     window.addEventListener("resize", onResize);
     if (typeof MutationObserver !== "undefined") {
@@ -187,9 +188,9 @@
     document.body.appendChild(panelEl);
 
     byId("pi-pause")?.addEventListener("click", pause);
-    byId("pi-resume-bubble")?.addEventListener("mousedown", beginBubbleDrag);
+    byId("pi-resume-bubble")?.addEventListener("pointerdown", beginBubbleDrag);
     byId("pi-resume-bubble")?.addEventListener("click", activateResumeBubble);
-    byId("pi-minimized-bubble")?.addEventListener("mousedown", beginBubbleDrag);
+    byId("pi-minimized-bubble")?.addEventListener("pointerdown", beginBubbleDrag);
     byId("pi-minimized-bubble")?.addEventListener("click", restorePanel);
     byId("pi-minimize")?.addEventListener("click", () => setMinimized(true));
     byId("pi-close")?.addEventListener("click", showAbortDialog);
@@ -259,8 +260,9 @@
     document.removeEventListener("click", onPageClick, true);
     document.removeEventListener("wheel", onWheel, { capture: true });
     document.removeEventListener("keydown", onKeyDown, true);
-    document.removeEventListener("mousemove", onDragMove, true);
-    document.removeEventListener("mouseup", endBubbleDrag, true);
+    document.removeEventListener("pointermove", onDragMove, true);
+    document.removeEventListener("pointerup", endDrag, true);
+    document.removeEventListener("pointercancel", endDrag, true);
     window.removeEventListener("scroll", renderEvidence, true);
     window.removeEventListener("resize", onResize);
     livenessObserver?.disconnect();
@@ -993,13 +995,14 @@
     card.querySelector?.(".pi-note-send")?.addEventListener("click", () => { void sendNote(id); });
     card.querySelector?.(".pi-note-expand")?.addEventListener("click", () => moveElementTarget(id, "up"));
     card.querySelector?.(".pi-note-contract")?.addEventListener("click", () => moveElementTarget(id, "down"));
-    card.querySelector?.(".pi-note-header")?.addEventListener("mousedown", (event) => {
-      if (event.button !== 0 || run.operation !== "idle" || run.modal !== "none" ||
-          event.target.closest?.("button")) return;
+    card.querySelector?.(".pi-note-header")?.addEventListener("pointerdown", (event) => {
+      if (!event.isPrimary || event.button !== 0 || run.operation !== "idle" ||
+          run.modal !== "none" || event.target.closest?.("button")) return;
       const bounds = card.getBoundingClientRect();
       noteDrag = {
         card,
         id,
+        pointerId: event.pointerId,
         startX: event.clientX,
         startY: event.clientY,
         startLeft: bounds.left,
@@ -1302,16 +1305,23 @@
   }
 
   function beginBubbleDrag(event) {
-    if (event.button !== 0 || run.operation !== "idle" ||
+    if (!event.isPrimary || event.button !== 0 || run.operation !== "idle" ||
         (!minimized && run.mode !== "interacting")) return;
     const rect = panelEl.getBoundingClientRect();
-    bubbleDrag = { x: event.clientX, y: event.clientY, left: rect.left, top: rect.top };
+    bubbleDrag = {
+      pointerId: event.pointerId,
+      x: event.clientX,
+      y: event.clientY,
+      left: rect.left,
+      top: rect.top,
+    };
     bubbleDragged = false;
     event.preventDefault();
   }
 
   function onDragMove(event) {
     if (noteDrag) {
+      if (event.pointerId !== noteDrag.pointerId) return;
       const position = placeNoteCard(noteDrag.card, {
         left: noteDrag.startLeft + event.clientX - noteDrag.startX,
         top: noteDrag.startTop + event.clientY - noteDrag.startY,
@@ -1319,9 +1329,10 @@
       const record = records.get(noteDrag.id);
       if (record) record.notePosition = position;
       renderConnectors();
+      event.preventDefault();
       return;
     }
-    if (!bubbleDrag || !panelEl) return;
+    if (!bubbleDrag || !panelEl || event.pointerId !== bubbleDrag.pointerId) return;
     const dx = event.clientX - bubbleDrag.x;
     const dy = event.clientY - bubbleDrag.y;
     if (Math.abs(dx) > 3 || Math.abs(dy) > 3) bubbleDragged = true;
@@ -1335,12 +1346,16 @@
       left: `${bubblePosition.x}px`, top: `${bubblePosition.y}px`,
       right: "auto", bottom: "auto",
     });
+    event.preventDefault();
   }
 
-  function endBubbleDrag() {
+  function endDrag(event) {
+    const activeDrag = noteDrag || bubbleDrag;
+    if (activeDrag && event.pointerId !== activeDrag.pointerId) return;
     bubbleDrag = null;
     noteDrag?.card?.classList.remove("dragging");
     noteDrag = null;
+    if (event.type === "pointercancel") bubbleDragged = false;
   }
 
   function onResize() {

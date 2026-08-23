@@ -16,6 +16,34 @@ async function openStepMenu(page) {
   if (!await allSteps.isVisible()) await page.getByRole("button", { name: /^More options/ }).click();
 }
 
+async function dragByTouchPointer(locator, deltaX, deltaY) {
+  const bounds = await locator.boundingBox();
+  const start = {
+    pointerId: 1,
+    pointerType: "touch",
+    isPrimary: true,
+    button: 0,
+    buttons: 1,
+    clientX: bounds.x + 16,
+    clientY: bounds.y + bounds.height / 2,
+  };
+  await locator.dispatchEvent("pointerdown", start);
+  for (let step = 1; step <= 4; step += 1) {
+    await locator.dispatchEvent("pointermove", {
+      ...start,
+      button: -1,
+      clientX: start.clientX + deltaX * step / 4,
+      clientY: start.clientY + deltaY * step / 4,
+    });
+  }
+  await locator.dispatchEvent("pointerup", {
+    ...start,
+    buttons: 0,
+    clientX: start.clientX + deltaX,
+    clientY: start.clientY + deltaY,
+  });
+}
+
 async function expectCurrentTargetOutline(page, targetSelector) {
   const outline = page.getByLabel("Current Element annotation target");
   await expect(outline).toBeVisible();
@@ -225,6 +253,23 @@ test("an Element annotation card can be dragged by its header without losing its
   expect(after.y).toBeGreaterThanOrEqual(0);
   expect(after.x + after.width).toBeLessThanOrEqual(viewport.width);
   expect(after.y + after.height).toBeLessThanOrEqual(viewport.height);
+});
+
+test("an Element annotation card can be dragged by touch on mobile", async ({ workflow }) => {
+  const { page } = workflow;
+  await page.setViewportSize({ width: 390, height: 844 });
+  const card = await annotate(page, "#state-one", "Keep this while moving by touch");
+  const header = card.locator(".pi-note-header");
+  const before = await card.boundingBox();
+
+  await dragByTouchPointer(header, -48, 64);
+
+  await expect.poll(async () => {
+    const after = await card.boundingBox();
+    return after && Math.abs(after.x - before.x + 48) < 2 && Math.abs(after.y - before.y - 64) < 2;
+  }).toBe(true);
+  await expect(header).toHaveCSS("touch-action", "none");
+  await expect(card.locator(".pi-note-textarea")).toHaveValue("Keep this while moving by touch");
 });
 
 test("an open Element annotation card has a connector to its numbered marker that follows dragging", async ({ workflow }) => {

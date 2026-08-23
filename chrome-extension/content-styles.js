@@ -261,6 +261,8 @@
       border-bottom: 1px solid var(--pi-border-muted);
       cursor: grab;
       flex-shrink: 0;
+      touch-action: none;
+      user-select: none;
     }
 
     .pi-note-badge {
