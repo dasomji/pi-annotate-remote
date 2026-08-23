@@ -162,8 +162,8 @@ function createChooserHarness({ configured = true } = {}) {
             return { selectedSessionId: message.sessionId };
           case "START_ANNOTATION":
             return { started: true };
-          case "OPEN_SESSION_CHOOSER_SETTINGS":
-            return { windowId: 10 };
+          case "OPEN_SETTINGS":
+            return { opened: true, tabId: 10 };
           case "SESSION_CHOOSER_CLOSED":
             return { closed: true };
           default:
@@ -229,7 +229,7 @@ test("in-page Session chooser is a compact modal with recommended session presel
   assert.equal(harness.wasFocusRestored(), true);
 });
 
-test("unconfigured modal routes connection setup to the compact extension window", async () => {
+test("unconfigured Session chooser routes connection setup to the settings page", async () => {
   const harness = createChooserHarness({ configured: false });
 
   harness.deliver({ type: "OPEN_SESSION_CHOOSER" });
@@ -241,6 +241,7 @@ test("unconfigured modal routes connection setup to the compact extension window
 
   await harness.shadow.getElementById("connect").trigger("click");
   await flushAsync();
-  assert.ok(harness.messages.some((message) => message.type === "OPEN_SESSION_CHOOSER_SETTINGS"));
+  assert.ok(harness.messages.some((message) => message.type === "OPEN_SETTINGS"));
+  assert.ok(harness.messages.some((message) => message.type === "SESSION_CHOOSER_CLOSED"));
   assert.equal(harness.host.isConnected, false);
 });

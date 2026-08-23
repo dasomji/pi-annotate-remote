@@ -1,7 +1,7 @@
 /**
  * Pi Annotate - Background Service Worker
  *
- * Owns the in-page Session chooser, compact fallback window, broker credentials,
+ * Owns the in-page Session chooser, extension settings, broker credentials,
  * recommendations, and network requests. Chooser and content scripts use runtime messages.
  */
 
@@ -12,8 +12,6 @@ const BROKER_TIMEOUT_MS = 20_000;
 const MAX_ERROR_LENGTH = 300;
 const MAX_SESSION_COUNT = 1_000;
 const MAX_RECOMMENDATIONS = 100;
-const CHOOSER_WIDTH = 420;
-const CHOOSER_HEIGHT = 560;
 const PAIRING_CODE_PATTERN = /^[A-Za-z0-9_-]{43}$/;
 const SCREENSHOT_RATE_WINDOW_MS = 1_050;
 const SCREENSHOTS_PER_RATE_WINDOW = 2;
@@ -35,7 +33,7 @@ let chooserStateFallback = {};
 let screenshotCaptureQueue = Promise.resolve();
 let screenshotCaptureTimes = [];
 
-// Keep the bearer token and chooser state out of content-script contexts. Chooser,
+// Keep the bearer token and chooser state out of content-script contexts. Settings,
 // pairing, and service-worker pages remain trusted extension contexts.
 chrome.storage.local.setAccessLevel({ accessLevel: "TRUSTED_CONTEXTS" }).catch(() => {});
 chrome.storage.session?.setAccessLevel({ accessLevel: "TRUSTED_CONTEXTS" }).catch(() => {});
@@ -398,27 +396,19 @@ async function resolveTargetTab(tabHint) {
   return tab;
 }
 
-async function notifyChooserContextChanged() {
-  try {
-    await chrome.runtime.sendMessage({ type: "SESSION_CHOOSER_CONTEXT_UPDATED" });
-  } catch {
-    // No chooser page is listening yet.
-  }
-}
-
-async function chooserTarget(tabHint, normalWindowHint) {
-  const normalWindow = normalWindowHint || await getLastFocusedNormalWindow();
+async function chooserTarget(tabHint) {
+  const normalWindow = await getLastFocusedNormalWindow();
   let targetTab = tabHint?.id ? tabHint : activeTabInWindow(normalWindow);
   if (!targetTab && normalWindow?.id) targetTab = await queryActiveTab(normalWindow.id);
   return { normalWindow, targetTab };
 }
 
-async function rememberChooserTarget(targetTab, normalWindow, surface) {
+async function rememberChooserTarget(targetTab, normalWindow) {
   return updateChooserState({
-    targetTabId: targetTab?.id || null,
-    targetWindowId: targetTab?.windowId || normalWindow?.id || null,
-    baseOrigin: pageOrigin(targetTab?.url),
-    modalTabId: surface === "modal" ? targetTab?.id || null : null,
+    targetTabId: targetTab.id,
+    targetWindowId: targetTab.windowId || normalWindow?.id || null,
+    baseOrigin: pageOrigin(targetTab.url),
+    modalTabId: targetTab.id,
   });
 }
 
@@ -457,98 +447,33 @@ async function closePreviousChooserModal(state, nextTabId) {
   }
 }
 
-async function closePreviousChooserWindow(state) {
-  if (!Number.isInteger(state?.windowId)) return;
-  try {
-    await chrome.windows.remove(state.windowId);
-  } catch {
-    // The fallback window was already closed.
-  }
-}
-
-async function openChooserWindow(tabHint, normalWindowHint, openSettings = false) {
-  const { normalWindow, targetTab } = await chooserTarget(tabHint, normalWindowHint);
-  const previousState = await getChooserState();
-  const state = await rememberChooserTarget(targetTab, normalWindow, "window");
-  const chooserUrl = chrome.runtime.getURL(`session-chooser-window.html${openSettings ? "?settings=1" : ""}`);
-
-  if (Number.isInteger(state.windowId) && Number.isInteger(state.chooserTabId)) {
-    try {
-      const existing = await chrome.windows.get(state.windowId, { populate: true });
-      const isChooser = existing?.type === "popup" &&
-        existing.tabs?.some((tab) => tab.id === state.chooserTabId);
-      if (isChooser) {
-        await chrome.windows.update(state.windowId, { focused: true });
-        await notifyChooserContextChanged();
-        if (openSettings) {
-          try {
-            await chrome.runtime.sendMessage({ type: "OPEN_SESSION_CHOOSER_SETTINGS_PANEL" });
-          } catch {
-            // The fallback page may still be loading; its query string handles first open.
-          }
-        }
-        await closePreviousChooserModal(previousState);
-        return { windowId: state.windowId, reused: true };
-      }
-    } catch {
-      // Stale window IDs are expected after the chooser is closed.
-    }
-  }
-
-  const createOptions = {
-    type: "popup",
-    url: chooserUrl,
-    focused: true,
-    width: CHOOSER_WIDTH,
-    height: CHOOSER_HEIGHT,
-  };
-  if (
-    Number.isFinite(normalWindow?.left) && Number.isFinite(normalWindow?.top) &&
-    Number.isFinite(normalWindow?.width) && Number.isFinite(normalWindow?.height)
-  ) {
-    createOptions.left = Math.round(normalWindow.left + (normalWindow.width - CHOOSER_WIDTH) / 2);
-    createOptions.top = Math.round(normalWindow.top + (normalWindow.height - CHOOSER_HEIGHT) / 2);
-  }
-
-  let created;
-  try {
-    created = await chrome.windows.create(createOptions);
-  } catch (error) {
-    if (!("left" in createOptions) && !("top" in createOptions)) throw error;
-    const unpositionedOptions = { ...createOptions };
-    delete unpositionedOptions.left;
-    delete unpositionedOptions.top;
-    created = await chrome.windows.create(unpositionedOptions);
-  }
-  if (!Number.isInteger(created?.id)) throw new Error("Chrome did not create the Pi Annotate window");
-  const chooserTabId = created.tabs?.find((tab) => tab.url === chooserUrl)?.id || created.tabs?.[0]?.id;
-  await updateChooserState({
-    modalTabId: null,
-    windowId: created.id,
-    chooserTabId: Number.isInteger(chooserTabId) ? chooserTabId : null,
-  });
-  await closePreviousChooserModal(previousState);
-  return { windowId: created.id, reused: false };
-}
-
 async function openChooser(tabHint) {
   const { normalWindow, targetTab } = await chooserTarget(tabHint);
-  const previousState = await getChooserState();
-  await closePreviousChooserModal(previousState, targetTab?.id);
-
-  if (targetTab?.id && !isRestrictedUrl(targetTab.url)) {
-    await rememberChooserTarget(targetTab, normalWindow, "modal");
-    try {
-      await showChooserInTab(targetTab.id);
-      await closePreviousChooserWindow(previousState);
-      await updateChooserState({ modalTabId: targetTab.id, windowId: null, chooserTabId: null });
-      return { tabId: targetTab.id, surface: "modal" };
-    } catch {
-      // Chrome-owned and otherwise uninjectable pages use the compact extension window.
-    }
+  if (!targetTab?.id || isRestrictedUrl(targetTab.url)) {
+    throw new Error("Open a regular web page before opening Pi Annotate");
   }
 
-  return openChooserWindow(targetTab, normalWindow);
+  const previousState = await getChooserState();
+  await closePreviousChooserModal(previousState, targetTab.id);
+  await rememberChooserTarget(targetTab, normalWindow);
+  try {
+    await showChooserInTab(targetTab.id);
+  } catch (error) {
+    await updateChooserState({ modalTabId: null });
+    throw error;
+  }
+  return { tabId: targetTab.id, surface: "modal" };
+}
+
+async function openSettings(tabHint) {
+  const normalWindow = await getLastFocusedNormalWindow();
+  const windowId = tabHint?.windowId || normalWindow?.id;
+  const created = await chrome.tabs.create({
+    ...(Number.isInteger(windowId) ? { windowId } : {}),
+    url: chrome.runtime.getURL("settings.html"),
+    active: true,
+  });
+  return { opened: true, tabId: created?.id };
 }
 
 async function openShortcutSettings() {
@@ -649,8 +574,8 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
   switch (message?.type) {
     case "GET_BROKER_CONFIG":
       return runMessageTask(async () => {
-        // The bearer token stays out of content-script contexts; only extension
-        // pages (the compact fallback window) may read the stored config.
+        // The bearer token stays out of content-script contexts; only trusted
+        // extension pages such as settings and pairing may read stored config.
         if (!trustedExtensionPageUrl(sender)) {
           throw new Error("Broker configuration is only available to extension pages");
         }
@@ -674,8 +599,8 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
     case "OPEN_SHORTCUT_SETTINGS":
       return runMessageTask(openShortcutSettings, sendResponse);
 
-    case "OPEN_SESSION_CHOOSER_SETTINGS":
-      return runMessageTask(() => openChooserWindow(sender.tab, undefined, true), sendResponse);
+    case "OPEN_SETTINGS":
+      return runMessageTask(() => openSettings(sender.tab), sendResponse);
 
     case "SESSION_CHOOSER_CLOSED":
       return runMessageTask(async () => {
@@ -734,15 +659,4 @@ chrome.commands.onCommand.addListener((command) => {
   return openChooser().catch(() => {
     // Keep command failures quiet; the toolbar action remains available.
   });
-});
-
-chrome.windows.onRemoved.addListener((windowId) => {
-  getChooserState()
-    .then((state) => {
-      if (state.windowId === windowId) {
-        return updateChooserState({ windowId: null, chooserTabId: null });
-      }
-      return undefined;
-    })
-    .catch(() => {});
 });

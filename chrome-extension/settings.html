@@ -1,0 +1,157 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Pi Annotate settings</title>
+  <style>
+    :root {
+      color-scheme: dark;
+      --bg: #09090b;
+      --card: #18181b;
+      --field: #202023;
+      --hover: #323238;
+      --border: #3f3f46;
+      --fg: #f4f4f5;
+      --muted: #a1a1aa;
+      --dim: #71717a;
+      --accent: #818cf8;
+      --accent-strong: #6366f1;
+      --success: #22c55e;
+      --warning: #eab308;
+      --error: #ef4444;
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+    }
+    * { box-sizing: border-box; }
+    body {
+      min-height: 100vh;
+      margin: 0;
+      display: grid;
+      place-items: center;
+      padding: 24px;
+      background: var(--bg);
+      color: var(--fg);
+    }
+    main {
+      width: min(520px, 100%);
+      padding: 28px;
+      border: 1px solid #27272a;
+      border-radius: 16px;
+      background: var(--card);
+      box-shadow: 0 24px 80px rgba(0, 0, 0, .45);
+    }
+    .brand { display: flex; align-items: center; gap: 10px; }
+    .logo { color: #a5b4fc; font-size: 26px; font-weight: 750; line-height: 1; }
+    h1 { margin: 0; font-size: 21px; }
+    h2 { margin: 0 0 14px; font-size: 13px; }
+    .intro { margin: 10px 0 20px; color: var(--muted); font-size: 13px; line-height: 1.55; }
+    .status-bar {
+      display: flex;
+      min-height: 42px;
+      align-items: flex-start;
+      gap: 9px;
+      margin-bottom: 20px;
+      padding: 11px 12px;
+      border: 1px solid #303038;
+      border-radius: 10px;
+      background: var(--field);
+    }
+    .status-dot { width: 8px; height: 8px; flex: none; margin-top: 4px; border-radius: 50%; background: var(--dim); }
+    .status-dot.connected { background: var(--success); }
+    .status-dot.checking { background: var(--warning); animation: pulse 1s infinite; }
+    .status-dot.error { background: var(--error); }
+    @keyframes pulse { 50% { opacity: .4; } }
+    .status-text { min-width: 0; font-size: 12px; line-height: 1.5; overflow-wrap: anywhere; }
+    .field { margin-bottom: 14px; }
+    .field > label { display: block; margin-bottom: 6px; color: var(--muted); font-size: 11px; font-weight: 650; }
+    input {
+      width: 100%;
+      padding: 10px 11px;
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      outline: none;
+      background: var(--bg);
+      color: var(--fg);
+      font: inherit;
+      font-size: 12px;
+    }
+    input:focus { border-color: var(--accent); box-shadow: 0 0 0 2px rgba(99, 102, 241, .18); }
+    input::placeholder { color: #52525b; }
+    .token-field { display: flex; gap: 8px; }
+    .token-field input { min-width: 0; font-family: ui-monospace, SFMono-Regular, Menlo, monospace; }
+    .hint { margin: 6px 0 0; color: var(--dim); font-size: 10px; line-height: 1.5; }
+    code { color: #c4b5fd; }
+    button {
+      padding: 9px 13px;
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      background: #27272a;
+      color: #e4e4e7;
+      cursor: pointer;
+      font: inherit;
+      font-size: 12px;
+      font-weight: 650;
+    }
+    button:hover:not(:disabled) { background: var(--hover); color: white; }
+    button:focus-visible, input:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+    button:disabled { cursor: wait; opacity: .5; }
+    .primary { width: 100%; padding: 11px 14px; border-color: var(--accent-strong); background: var(--accent-strong); color: white; }
+    .primary:hover:not(:disabled) { background: #4f46e5; }
+    .divider { height: 1px; margin: 24px 0; background: #35353b; }
+    .shortcut-row { display: flex; align-items: center; gap: 10px; }
+    .shortcut-key {
+      min-width: 0;
+      flex: 1;
+      padding: 9px 10px;
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      background: var(--bg);
+      color: var(--muted);
+      font: 12px ui-monospace, SFMono-Regular, Menlo, monospace;
+    }
+    .shortcut-key.unassigned { color: var(--warning); }
+    @media (prefers-reduced-motion: reduce) { .status-dot.checking { animation: none; } }
+  </style>
+</head>
+<body>
+  <main>
+    <div class="brand"><span class="logo" aria-hidden="true">π</span><h1>Pi Annotate settings</h1></div>
+    <p class="intro">Use the pairing link printed by <code>/annotate setup</code> when possible. Enter its manual fallback here only for recovery.</p>
+
+    <div class="status-bar" role="status" aria-live="polite">
+      <span class="status-dot" id="status-dot" aria-hidden="true"></span>
+      <span class="status-text" id="status-text">Loading settings…</span>
+    </div>
+
+    <section aria-labelledby="connection-heading">
+      <h2 id="connection-heading">Connection</h2>
+      <form id="broker-form">
+        <div class="field">
+          <label for="broker-endpoint">Broker endpoint</label>
+          <input id="broker-endpoint" type="url" inputmode="url" autocomplete="url" placeholder="https://machine.tailnet.ts.net" required>
+          <p class="hint">Remote endpoints require HTTPS. Same-machine loopback may use HTTP.</p>
+        </div>
+        <div class="field">
+          <label for="broker-token">Broker token</label>
+          <div class="token-field">
+            <input id="broker-token" type="password" autocomplete="off" spellcheck="false" required>
+            <button id="toggle-token" type="button" aria-label="Show broker token">Show</button>
+          </div>
+        </div>
+        <button class="primary" id="save-btn" type="submit">Save &amp; connect</button>
+      </form>
+    </section>
+
+    <div class="divider"></div>
+    <section aria-labelledby="shortcut-heading">
+      <h2 id="shortcut-heading">Open Pi Annotate shortcut</h2>
+      <div class="shortcut-row">
+        <kbd class="shortcut-key" id="shortcut-key">Checking…</kbd>
+        <button id="edit-shortcut" type="button">Edit shortcut</button>
+      </div>
+      <p class="hint">Chrome manages extension shortcuts.</p>
+    </section>
+  </main>
+  <script src="settings.js"></script>
+</body>
+</html>
