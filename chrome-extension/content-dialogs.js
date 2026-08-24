@@ -20,6 +20,13 @@
       returnFocus = null;
     }
 
+    function isolateFromHostPage(element) {
+      const stopAtBoundary = (event) => event.stopPropagation();
+      for (const eventName of ["focusin", "focusout", "pointerdown"]) {
+        element.addEventListener(eventName, stopAtBoundary);
+      }
+    }
+
     function open({ kind, title, description, actions, focusTarget }) {
       remove({ restoreFocus: false });
       returnFocus = focusTarget || documentTarget.activeElement || null;
@@ -50,6 +57,7 @@
         button.addEventListener("click", handler);
         actionRow.appendChild(button);
       }
+      isolateFromHostPage(backdrop);
       documentTarget.body.appendChild(backdrop);
       dialog = backdrop;
       actionRow.querySelector("button")?.focus();
@@ -80,6 +88,7 @@
       backdrop.addEventListener("click", (event) => {
         if (event.target === backdrop) onClose();
       });
+      isolateFromHostPage(backdrop);
       documentTarget.body.appendChild(backdrop);
       dialog = backdrop;
       backdrop.querySelector(".pi-help-close")?.focus();
@@ -97,7 +106,13 @@
       return true;
     }
 
-    return Object.freeze({ open, openHelp, remove, trapTab });
+    return Object.freeze({
+      open,
+      openHelp,
+      remove,
+      trapTab,
+      contains: (node) => Boolean(dialog?.contains?.(node)),
+    });
   }
 
   modules.dialogs = { createDialogView };

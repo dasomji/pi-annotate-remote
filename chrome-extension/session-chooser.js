@@ -9,6 +9,12 @@
   let selectedSessionId = "";
   let refreshSequence = 0;
 
+  function stopReverseHostFocusTrap(event) {
+    if (host && event.relatedTarget === host) event.stopImmediatePropagation();
+  }
+
+  globalThis.addEventListener?.("focusout", stopReverseHostFocusTrap, true);
+
   const MARKUP = `
     <style>
       :host {
@@ -496,7 +502,9 @@
       if (event.target.classList.contains("backdrop")) closeSessionChooser();
     });
     shadow.addEventListener("keydown", onKeyDown);
-    for (const eventName of ["click", "pointerdown", "pointerup", "mousedown", "mouseup"]) {
+    for (const eventName of [
+      "focusin", "focusout", "click", "pointerdown", "pointerup", "mousedown", "mouseup",
+    ]) {
       shadow.addEventListener(eventName, (event) => event.stopPropagation());
     }
   }

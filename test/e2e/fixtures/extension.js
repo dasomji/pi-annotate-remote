@@ -167,6 +167,8 @@ async function startFixtureServer() {
 
   return {
     origin: `http://127.0.0.1:${server.address().port}`,
+    token: BROKER_TOKEN,
+    sessionId: SESSION_ID,
     state,
     async close() {
       server.closeAllConnections?.();
