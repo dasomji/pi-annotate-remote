@@ -69,6 +69,36 @@
     return document.getElementById(id);
   }
 
+  function containsNode(root, node) {
+    return Boolean(root && node && (root === node || root.contains?.(node)));
+  }
+
+  function isAnnotatorUiNode(node) {
+    return containsNode(panelEl, node)
+      || containsNode(notesEl, node)
+      || containsNode(markersEl, node)
+      || dialogs.contains(node);
+  }
+
+  function isolateFromHostPage(element) {
+    const stopAtBoundary = (event) => event.stopPropagation();
+    for (const eventName of ["focusin", "focusout", "pointerdown"]) {
+      element.addEventListener(eventName, stopAtBoundary);
+    }
+  }
+
+  function stopReverseHostFocusTrap(event) {
+    if (isAnnotatorUiNode(event.relatedTarget)) event.stopImmediatePropagation();
+  }
+
+  function startHostBoundaryGuard() {
+    window.addEventListener("focusout", stopReverseHostFocusTrap, true);
+  }
+
+  function stopHostBoundaryGuard() {
+    window.removeEventListener("focusout", stopReverseHostFocusTrap, true);
+  }
+
   chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
     if (message.type !== "START_ANNOTATION") return;
     const wasActive = run.active;
@@ -103,13 +133,16 @@
 
     markersEl = document.createElement("div");
     markersEl.id = "pi-markers";
+    isolateFromHostPage(markersEl);
     document.body.appendChild(markersEl);
 
     notesEl = document.createElement("div");
     notesEl.className = "pi-notes-container";
+    isolateFromHostPage(notesEl);
     document.body.appendChild(notesEl);
 
     createPanel();
+    startHostBoundaryGuard();
     document.addEventListener("mousemove", onMouseMove, true);
     document.addEventListener("click", onPageClick, true);
     document.addEventListener("wheel", onWheel, { capture: true, passive: false });
@@ -185,6 +218,7 @@
           </div>
         </div>
       </div>`;
+    isolateFromHostPage(panelEl);
     document.body.appendChild(panelEl);
 
     byId("pi-pause")?.addEventListener("click", pause);
@@ -263,6 +297,7 @@
     document.removeEventListener("pointermove", onDragMove, true);
     document.removeEventListener("pointerup", endDrag, true);
     document.removeEventListener("pointercancel", endDrag, true);
+    stopHostBoundaryGuard();
     window.removeEventListener("scroll", renderEvidence, true);
     window.removeEventListener("resize", onResize);
     livenessObserver?.disconnect();

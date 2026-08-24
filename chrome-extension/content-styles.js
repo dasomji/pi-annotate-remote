@@ -838,6 +838,7 @@
       padding: 20px;
       background: rgba(0, 0, 0, 0.55);
       font-family: var(--pi-font-ui);
+      pointer-events: auto;
     }
 
     .pi-modal,

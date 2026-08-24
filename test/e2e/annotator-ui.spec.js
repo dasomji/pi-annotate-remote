@@ -20,6 +20,114 @@ test("the annotator presents one composer with steps hidden in its menu", async 
   await expect(page.getByRole("button", { name: "Undo delete" })).toBeHidden();
 });
 
+test("host modal traps do not steal focus from the Session chooser", async ({
+  context,
+  extensionWorker,
+  fixtureServer,
+}) => {
+  const pages = context.pages();
+  const page = pages[0] || await context.newPage();
+  await page.goto(`${fixtureServer.origin}/workflow`);
+  await extensionWorker.evaluate(async ({ endpoint, token, sessionId }) => {
+    await chrome.storage.local.set({
+      brokerEndpoint: endpoint,
+      brokerToken: token,
+      selectedSessionId: sessionId,
+    });
+  }, {
+    endpoint: fixtureServer.origin,
+    token: fixtureServer.token,
+    sessionId: fixtureServer.sessionId,
+  });
+
+  await page.evaluate(() => {
+    const modal = document.createElement("section");
+    modal.id = "host-modal";
+    modal.innerHTML = '<input id="host-modal-input">';
+    document.body.prepend(modal);
+    globalThis.__hostFocusRedirects = 0;
+    document.addEventListener("focusin", (event) => {
+      if (modal.contains(event.target)) return;
+      globalThis.__hostFocusRedirects += 1;
+      modal.querySelector("input").focus();
+    });
+    modal.querySelector("input").focus();
+  });
+
+  const targetTab = await extensionWorker.evaluate(async () => {
+    const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
+    return tab;
+  });
+  await extensionWorker.evaluate((tab) => openChooser(tab), targetTab);
+  await expect(page.locator("#pi-annotate-session-chooser-host")).toBeVisible();
+
+  expect(await page.evaluate(() => ({
+    activeElementId: document.activeElement?.id,
+    focusRedirects: globalThis.__hostFocusRedirects,
+  }))).toEqual({
+    activeElementId: "pi-annotate-session-chooser-host",
+    focusRedirects: 0,
+  });
+});
+
+test("host modal traps do not steal annotator focus or treat annotator clicks as outside", async ({ workflow }) => {
+  const { page } = workflow;
+  await page.evaluate(() => {
+    const modal = document.createElement("section");
+    modal.id = "host-modal";
+    modal.setAttribute("role", "dialog");
+    modal.innerHTML = '<label>Host modal input <input id="host-modal-input"></label>';
+    Object.assign(modal.style, {
+      position: "fixed",
+      inset: "20px",
+      zIndex: "10",
+      pointerEvents: "auto",
+    });
+    document.body.prepend(modal);
+    document.body.style.pointerEvents = "none";
+
+    globalThis.__hostTrapState = { focusRedirects: 0, outsidePointerDowns: 0 };
+    document.addEventListener("focusin", (event) => {
+      if (modal.contains(event.target)) return;
+      globalThis.__hostTrapState.focusRedirects += 1;
+      modal.querySelector("input").focus();
+    });
+    document.addEventListener("pointerdown", (event) => {
+      if (!modal.contains(event.target)) globalThis.__hostTrapState.outsidePointerDowns += 1;
+    });
+    modal.querySelector("input").focus();
+  });
+
+  const context = page.getByRole("textbox", { name: "General context" });
+  await context.focus();
+  await page.keyboard.type("Annotator keeps focus");
+  const afterTyping = await page.evaluate(() => ({
+    activeElementId: document.activeElement?.id,
+    contextValue: document.querySelector("#pi-context")?.value,
+  }));
+  await page.getByRole("button", { name: "More options" }).click();
+  await page.getByRole("button", { name: "How to annotate" }).click();
+  const helpDialog = page.getByRole("dialog", { name: "How to annotate" });
+  await helpDialog.getByRole("button", { name: "Close help" }).click();
+
+  const observed = await page.evaluate((afterTyping) => ({
+    afterTyping,
+    moreOptionsOpen: document.querySelector("#pi-advanced")?.open,
+    helpDialogOpen: Boolean(document.querySelector(".pi-help-dialog")),
+    ...globalThis.__hostTrapState,
+  }), afterTyping);
+  expect(observed).toEqual({
+    afterTyping: {
+      activeElementId: "pi-context",
+      contextValue: "Annotator keeps focus",
+    },
+    moreOptionsOpen: true,
+    helpDialogOpen: false,
+    focusRedirects: 0,
+    outsidePointerDowns: 0,
+  });
+});
+
 test("the step filmstrip stays contained inside the menu as steps accumulate", async ({ workflow }) => {
   const { page } = workflow;
   const composer = page.getByRole("group", { name: "Annotation composer" });

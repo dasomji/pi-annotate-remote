@@ -772,8 +772,10 @@ export default function (pi: ExtensionAPI) {
   let currentCtx: AnnotationContext | null = null;
   let setupShown = false;
   let serveInfo: TailscaleServeInfo | null = null;
+  let active = true;
 
   function setStatus(message: string) {
+    if (!active) return;
     currentCtx?.ui?.setStatus?.("pi-annotate", message);
   }
 
@@ -785,6 +787,7 @@ export default function (pi: ExtensionAPI) {
     ctx: AnnotationContext,
     { refreshServe = false } = {},
   ): Promise<{ token: string; serve: TailscaleServeInfo; sessionLabel: string }> {
+    if (!active) throw new Error("Annotation session is shutting down");
     currentCtx = ctx;
     if (!annotationClient) {
       annotationClient = new AnnotationSessionClient({
@@ -792,26 +795,32 @@ export default function (pi: ExtensionAPI) {
         baseLabel: sessionBaseLabel,
         socketPath: brokerConfig.socketPath,
         ensureBroker: async () => {
-          brokerToken = await ensureBrokerRunning({ config: brokerConfig, daemonPath });
-          return brokerToken;
+          const token = await ensureBrokerRunning({ config: brokerConfig, daemonPath });
+          if (active) brokerToken = token;
+          return token;
         },
         onStatus: setStatus,
         onAnnotation: async (value: unknown) => {
+          if (!active) return;
           if (!isAnnotationResult(value)) throw new Error("Annotation payload is invalid");
           const text = await formatAnnotationResult(value);
+          if (!active) return;
           sendAnnotationToPi(pi, text, currentCtx || {});
         },
       });
     }
     await annotationClient.enable();
+    if (!active) throw new Error("Annotation session was shut down while starting");
     if (!brokerToken) {
       brokerToken = await ensureBrokerRunning({ config: brokerConfig, daemonPath });
+      if (!active) throw new Error("Annotation session was shut down while starting");
     }
     if (refreshServe || !serveInfo?.active) {
       serveInfo = await ensureTailscaleServe({
         host: brokerConfig.host,
         port: brokerConfig.port,
       });
+      if (!active) throw new Error("Annotation session was shut down while starting");
     }
     return { token: brokerToken, serve: serveInfo, sessionLabel: currentSessionLabel() };
   }
@@ -840,13 +849,16 @@ export default function (pi: ExtensionAPI) {
 
     try {
       const enabled = await enableAnnotationSession(ctx, { refreshServe: action === "setup" });
-      ctx.ui?.notify?.(await createSetupInstructions({
+      const instructions = await createSetupInstructions({
         sessionLabel: enabled.sessionLabel,
         token: enabled.token,
         serve: enabled.serve,
-      }), "info");
+      });
+      if (!active) return;
+      ctx.ui?.notify?.(instructions, "info");
       setupShown = true;
     } catch (error) {
+      if (!active) return;
       const message = error instanceof Error ? error.message : String(error);
       ctx.ui?.notify?.(`Could not start annotation broker: ${message}`, "error");
     }
@@ -877,11 +889,13 @@ export default function (pi: ExtensionAPI) {
       try {
         const enabled = await enableAnnotationSession(ctx);
         if (!setupShown && ctx.hasUI) {
-          ctx.ui.notify(await createSetupInstructions({
+          const instructions = await createSetupInstructions({
             sessionLabel: enabled.sessionLabel,
             token: enabled.token,
             serve: enabled.serve,
-          }), "info");
+          });
+          if (!active) throw new Error("Annotation session was shut down while starting");
+          ctx.ui.notify(instructions, "info");
           setupShown = true;
         }
         const endpointText = enabled.serve.endpoint
@@ -903,7 +917,12 @@ export default function (pi: ExtensionAPI) {
       } catch (error) {
         const message = error instanceof Error ? error.message : String(error);
         return {
-          content: [{ type: "text", text: `Could not start annotation broker: ${message}` }],
+          content: [{
+            type: "text",
+            text: active
+              ? `Could not start annotation broker: ${message}`
+              : "Annotation session shut down before setup completed.",
+          }],
           details: { error: message },
         };
       }
@@ -911,7 +930,10 @@ export default function (pi: ExtensionAPI) {
   });
 
   pi.on("session_shutdown", async () => {
-    annotationClient?.disable();
+    active = false;
+    currentCtx = null;
+    const client = annotationClient;
     annotationClient = null;
+    client?.disable();
   });
 }
