@@ -19,7 +19,8 @@
     "test:e2e:headed": "playwright test --headed",
     "test:e2e:debug": "playwright test --debug",
     "install:e2e": "playwright install chromium",
-    "check": "node --check index.ts && node --check broker/*.js && node --check chrome-extension/*.js && node scripts/check-version.js"
+    "check": "node scripts/check-syntax.js && npm run typecheck && node scripts/check-version.js",
+    "typecheck": "tsc --noEmit"
   },
   "peerDependencies": {
     "@earendil-works/pi-coding-agent": "*",
@@ -37,6 +38,7 @@
   "files": [
     "index.ts",
     "types.ts",
+    "annotation/",
     "broker/",
     "chrome-extension/",
     "scripts/",
@@ -50,6 +52,8 @@
     ]
   },
   "devDependencies": {
-    "@playwright/test": "^1.62.1"
+    "@playwright/test": "^1.62.1",
+    "@types/node": "^22.20.1",
+    "typescript": "^7.0.2"
   }
 }

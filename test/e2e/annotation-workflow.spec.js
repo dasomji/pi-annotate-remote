@@ -260,3 +260,34 @@ test("Etch records ordered annotation periods but excludes the paused mutation p
     to: "rgb(0, 140, 0)",
   }]);
 });
+
+test("a vanished session can be replaced without losing the draft", async ({ workflow }) => {
+  const { page, server } = workflow;
+  const replacement = "replacement-session-0001";
+  server.state.failDeliveries = 1;
+  server.state.sessions = [{ id: replacement, label: "Replacement session" }];
+  await page.getByRole("textbox", { name: "General context" }).fill("Keep this draft intact");
+  await page.getByRole("button", { name: /^Submit/ }).click();
+  await expect(page.getByRole("alert")).toContainText("no longer available");
+  await page.getByRole("combobox", { name: "Choose another annotation session" }).selectOption(replacement);
+  await page.getByRole("button", { name: "Retry", exact: true }).click();
+  await expect(page.locator("#pi-panel")).toHaveCount(0);
+  expect(server.state.annotationSessionIds).toEqual([server.sessionId, replacement]);
+  expect(server.state.annotations[1]).toEqual(server.state.annotations[0]);
+});
+
+test("Escape blurs the annotation field and preserves the draft until abort is confirmed", async ({ workflow }) => {
+  const { page } = workflow;
+  const context = page.getByRole("textbox", { name: "General context" });
+  await context.fill("Keep this context");
+  await page.keyboard.press("Escape");
+  await expect(context).not.toBeFocused();
+  await expect(page.getByRole("dialog")).toHaveCount(0);
+  await page.keyboard.press("Escape");
+  await page.keyboard.press("Escape");
+  const dialog = page.getByRole("dialog");
+  await expect(dialog).toBeVisible();
+  await dialog.getByRole("button", { name: "Continue annotating" }).click();
+  await expect(dialog).toHaveCount(0);
+  await expect(context).toHaveValue("Keep this context");
+});

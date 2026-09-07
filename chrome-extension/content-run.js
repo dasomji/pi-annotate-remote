@@ -96,10 +96,6 @@
       state.modal = "none";
     }
 
-    function snapshot() {
-      return Object.freeze({ generation, ...state });
-    }
-
     return Object.freeze({
       start,
       stop,
@@ -116,7 +112,6 @@
         state.operation === "idle" && state.modal === "none",
       ownsPageClicks: () => state.active && state.mode === "annotating",
       isCurrent: tokenMatches,
-      snapshot,
       get active() { return state.active; },
       get sessionId() { return state.sessionId; },
       get mode() { return state.mode; },

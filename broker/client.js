@@ -123,6 +123,7 @@ async function waitForCurrentBroker(config, daemonPath, env) {
   throw new Error(`Broker did not start with protocol ${BROKER_PROTOCOL_VERSION} within ${START_TIMEOUT_MS / 1000} seconds`);
 }
 
+/** @param {{ config?: ReturnType<typeof getBrokerConfig>, daemonPath?: string, env?: NodeJS.ProcessEnv }} [options] */
 export async function ensureBrokerRunning({ config = getBrokerConfig(), daemonPath, env = process.env } = {}) {
   if (!daemonPath) throw new Error("Broker daemon path is required");
 

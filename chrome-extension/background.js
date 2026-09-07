@@ -26,7 +26,9 @@ const ANNOTATOR_SCRIPT_FILES = [
   "content-route-guard.js",
   "content-navigation.js",
   "content-run.js",
+  "content-capture-coordinator.js",
   "content-dialogs.js",
+  "content-evidence-view.js",
   "content.js",
 ];
 let chooserStateFallback = {};

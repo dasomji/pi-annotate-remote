@@ -33,21 +33,15 @@
   let etchEnabled = false;
   let debugMode = false;
   let stepFilter = "all";
-  let activeRecordId = null;
   let hovered = null;
   let hoverStack = [];
   let hoverIndex = 0;
-  let capturePromise = null;
-  let captureLifecyclePromise = null;
-  let resolveCaptureLifecycle = null;
   let transitionPromise = null;
-  let failedCapture = null;
   let deliveryError = "";
   let deliveryConfirmedDegraded = false;
   let sessionRecoveryActive = false;
   let recoverySessions = [];
   let bubbleDrag = null;
-  let noteDrag = null;
   let bubbleDragged = false;
   let bubblePosition = null;
   let escapeCount = 0;
@@ -57,13 +51,36 @@
   let captureReturnTimer = null;
 
   let draft = createDraft({ createId: makeId });
-  const records = new Map();
   let styleEl;
   let panelEl;
   let highlightEl;
-  let connectorsEl;
-  let markersEl;
-  let notesEl;
+
+  const evidenceView = modules.evidenceView.createEvidenceView({
+    inspect,
+    readState: (snapshot = draft.snapshot()) => ({
+      snapshot,
+      filter: stepFilter,
+      mode: run.mode,
+      blocked: run.operation !== "idle" || run.modal !== "none" || snapshot.capture !== null,
+      reservedBottom: run.mode === "annotating" && !minimized ? panelEl?.getBoundingClientRect().top : null,
+    }),
+    actions: {
+      comment: (id, text) => { if (run.operation === "idle") draft.updateComment(id, text); },
+      delete: deleteRecord,
+      send: sendNote,
+      retarget: (id, target) => {
+        if (run.operation !== "idle" || run.modal !== "none" || !draft.canRetarget(id)) return false;
+        const result = draft.retargetElement({ id, sourceNode: target, metadata: freezeMetadata(target) });
+        if (result.status !== "retargeted") return false;
+        deliveryConfirmedDegraded = false;
+        return true;
+      },
+    },
+  });
+
+  function renderEvidence(snapshot) {
+    evidenceView.render(snapshot?.steps ? snapshot : undefined);
+  }
 
   function byId(id) {
     return document.getElementById(id);
@@ -75,8 +92,7 @@
 
   function isAnnotatorUiNode(node) {
     return containsNode(panelEl, node)
-      || containsNode(notesEl, node)
-      || containsNode(markersEl, node)
+      || evidenceView.contains(node)
       || dialogs.contains(node);
   }
 
@@ -126,20 +142,7 @@
     highlightEl.style.display = "none";
     document.body.appendChild(highlightEl);
 
-    connectorsEl = document.createElementNS("http://www.w3.org/2000/svg", "svg");
-    connectorsEl.classList.add("pi-connectors");
-    connectorsEl.setAttribute("aria-hidden", "true");
-    document.body.appendChild(connectorsEl);
-
-    markersEl = document.createElement("div");
-    markersEl.id = "pi-markers";
-    isolateFromHostPage(markersEl);
-    document.body.appendChild(markersEl);
-
-    notesEl = document.createElement("div");
-    notesEl.className = "pi-notes-container";
-    isolateFromHostPage(notesEl);
-    document.body.appendChild(notesEl);
+    evidenceView.mount();
 
     createPanel();
     startHostBoundaryGuard();
@@ -257,18 +260,16 @@
   }
 
   function resetDraft() {
-    settleCaptureLifecycle();
+    captureCoordinator.reset();
     cleanupCaptureReturnAnimation();
     etch.reset();
     draft.purge();
     draft = createDraft({ createId: makeId });
-    records.clear();
+    evidenceView.reset();
     minimized = false;
     etchEnabled = false;
     debugMode = false;
     stepFilter = "all";
-    activeRecordId = null;
-    failedCapture = null;
     deliveryError = "";
     deliveryConfirmedDegraded = false;
     sessionRecoveryActive = false;
@@ -284,7 +285,7 @@
   function deactivate({ purge = true } = {}) {
     if (!run.active) return;
     run.stop();
-    settleCaptureLifecycle();
+    captureCoordinator.reset();
     cleanupCaptureReturnAnimation();
     navigationAdapter.stop();
     routeGuard.stop();
@@ -306,10 +307,10 @@
     livenessFrame = null;
     document.body.style.cursor = "";
     closeModal();
-    for (const element of [styleEl, panelEl, highlightEl, connectorsEl, markersEl, notesEl]) element?.remove();
-    styleEl = panelEl = highlightEl = connectorsEl = markersEl = notesEl = null;
-    records.clear();
-    activeRecordId = null;
+    evidenceView.remove();
+    for (const element of [styleEl, panelEl, highlightEl]) element?.remove();
+    styleEl = panelEl = highlightEl = null;
+    evidenceView.reset();
     clearTransientControllerState();
   }
 
@@ -317,11 +318,8 @@
     hovered = null;
     hoverStack = [];
     hoverIndex = 0;
-    capturePromise = null;
     transitionPromise = null;
     bubbleDrag = null;
-    noteDrag?.card?.classList.remove("dragging");
-    noteDrag = null;
     bubbleDragged = false;
     bubblePosition = null;
     escapeCount = 0;
@@ -366,91 +364,41 @@
       return;
     }
     if (result.status !== "staged") return;
-    records.set(result.id, {
-      id: result.id,
-      stepId: result.stepId,
-      sourceNode,
-      navigation: { path: [sourceNode], index: 0 },
-      notePosition: null,
-      noteOpen: true,
-    });
     stepFilter = previousStepId && result.stepId !== previousStepId ? "all" : result.stepId;
     deliveryConfirmedDegraded = false;
     render();
-    createNote(result.id);
+    evidenceView.open(result.id);
   }
 
-  async function captureElement(sourceNode, { retargetId = null } = {}) {
-    if (!run.canAnnotate()) return;
-    const metadata = retargetId ? null : freezeMetadata(sourceNode);
-    const clientRect = sourceNode.getBoundingClientRect();
-    const cropRect = {
-      x: clientRect.left,
-      y: clientRect.top,
-      width: clientRect.width,
-      height: clientRect.height,
-    };
-    if (!captureLifecyclePromise) {
-      captureLifecyclePromise = new Promise((resolve) => { resolveCaptureLifecycle = resolve; });
-    }
-    const viewport = { width: window.innerWidth, height: window.innerHeight };
-    const transaction = (retargetId ? draft.beginElementCapture : draft.beginCapture)({
-      ...(retargetId ? { id: retargetId } : {}),
-      sourceNode,
-      metadata,
-      cropRect,
-      url: window.location.href,
-      viewport,
-    });
-    if (transaction.status === "busy") return;
-    if (transaction.status === "focused") {
-      settleCaptureLifecycle();
-      render();
-      focusRecord(transaction.id);
-      return;
-    }
-    if (transaction.status === "step-closed") {
-      settleCaptureLifecycle();
-      render();
-      return;
-    }
-    if (transaction.status === "target-already-annotated") {
-      settleCaptureLifecycle();
-      render();
-      focusRecord(transaction.id);
-      return;
-    }
-    if (transaction.status === "source-disconnected" ||
-        transaction.status === "attempts-exhausted") {
-      failedCapture = {
-        transaction: transaction.transaction,
-        sourceNode,
+  const captureCoordinator = modules.captureCoordinator.createCaptureCoordinator({
+    run,
+    getDraft: () => draft,
+    readGeometry: (source) => {
+      const rect = source.getBoundingClientRect();
+      return {
+        cropRect: { x: rect.left, y: rect.top, width: rect.width, height: rect.height },
+        url: window.location.href,
+        viewport: { width: window.innerWidth, height: window.innerHeight },
       };
-      showCaptureFailure(transaction.status === "source-disconnected");
-      return;
-    }
+    },
+    captureImages: performCapture,
+    onChange: () => { deliveryConfirmedDegraded = false; render(); },
+    onFailure: showCaptureFailure,
+    onDiscard: (id) => evidenceView.open(id),
+  });
 
-    const operationToken = run.beginCapture();
-    if (!operationToken) return;
-    failedCapture = { transaction, sourceNode };
-    render();
-    capturePromise = performCapture(transaction, operationToken);
-    await capturePromise;
-    capturePromise = null;
-    render();
-  }
-
-  async function performCapture(transaction, operationToken) {
+  async function performCapture(transaction, isCurrent) {
     // Let the live-region progress state paint before temporarily removing the
     // extension chrome from the source bitmap.
     await twoFrames();
+    if (!isCurrent()) return null;
     const restore = hideChrome();
     let returnAnimationStarted = false;
     const restoreWithFlourish = () => {
       restore();
       if (returnAnimationStarted) return;
       returnAnimationStarted = true;
-      playCaptureReturnAnimation();
+      if (isCurrent()) playCaptureReturnAnimation();
     };
     await twoFrames();
     let viewportImage;
@@ -478,110 +426,20 @@
       restoreWithFlourish();
     }
 
-    if (!run.settle(operationToken)) return;
-    const result = draft.commitCapture(transaction, { viewportImage, cropImage });
-    if (result.status === "committed") {
-      finalizeCommittedCapture(result, transaction);
-      return;
-    }
-    failedCapture = {
-      transaction,
-      sourceNode: transaction.sourceNode,
-      images: { viewportImage, cropImage },
-    };
-    if (transaction.attempt >= 3) {
-      const committed = draft.commitIncomplete(transaction, { viewportImage, cropImage });
-      finalizeCommittedCapture(committed, transaction);
-      return;
-    }
-    showCaptureFailure(false);
+    return { viewportImage, cropImage };
   }
 
-  async function retryCapture() {
-    if (!failedCapture || run.operation !== "idle") return;
-    const pending = failedCapture;
-    closeModal();
-    if (pending.sourceNode.isConnected === false) {
-      showCaptureFailure(true);
-      return;
-    }
-    await captureElement(pending.sourceNode, {
-      retargetId: pending.transaction.retargetId || null,
-    });
-  }
-
-  function keepIncomplete() {
-    if (!failedCapture || run.operation !== "idle") return;
-    const transaction = failedCapture.transaction;
-    const attempt = transaction.attempt;
-    const disconnected = failedCapture.sourceNode.isConnected === false;
-    const images = failedCapture.images || {
-      viewportImage: capture.missingImage(
-        disconnected ? "source_disconnected" : "screenshot_failure", attempt),
-      cropImage: capture.missingImage(
-        disconnected ? "source_disconnected" : "crop_failure", attempt),
-    };
-    const result = draft.commitIncomplete(transaction, images);
-    commitRecord(result, transaction);
-    selectCreatedStep(transaction, result);
-    failedCapture = null;
-    settleCaptureLifecycle();
-    deliveryConfirmedDegraded = false;
-    closeModal();
-    render();
-  }
-
-  function selectCreatedStep(transaction, result) {
-    if (transaction.createsStep) stepFilter = "all";
-  }
-
-  function finalizeCommittedCapture(result, transaction) {
-    commitRecord(result, transaction);
-    selectCreatedStep(transaction, result);
-    failedCapture = null;
-    settleCaptureLifecycle();
-    deliveryConfirmedDegraded = false;
-    render();
-  }
-
-  function commitRecord(result, transaction) {
-    const existing = records.get(result.id);
-    if (!existing) {
-      records.set(result.id, {
-        id: result.id,
-        stepId: result.stepId,
-        sourceNode: transaction.sourceNode,
-        navigation: { path: [transaction.sourceNode], index: 0 },
-        notePosition: null,
-        noteOpen: true,
-      });
-      return;
-    }
-    existing.sourceNode = transaction.sourceNode;
-    existing.stepId = result.stepId;
-  }
-
-  function discardFailedCapture() {
-    const id = failedCapture?.transaction?.id;
-    if (failedCapture) draft.discardCapture(failedCapture.transaction);
-    failedCapture = null;
-    settleCaptureLifecycle();
-    closeModal();
-    render();
-    if (id && records.has(id)) createNote(id);
-  }
-
-  function showCaptureFailure(disconnected) {
-    const attempt = failedCapture?.transaction?.attempt || 1;
+  function showCaptureFailure(disconnected, attempt) {
     const terminal = attempt >= 3 || disconnected;
+    const decide = (action) => () => { closeModal(); void action(); };
     showModal("captureFailure", {
       title: disconnected ? "Source element is no longer available" : "Screenshot capture failed",
       description: terminal
         ? "Keep the frozen element as incomplete evidence, or discard it."
         : `Attempt ${attempt} of 3 failed. Retry captures a fresh screenshot.`,
       actions: terminal
-        ? [["Keep incomplete", keepIncomplete, "primary"], ["Discard", discardFailedCapture]]
-        : [["Retry", retryCapture, "primary"], ["Discard", discardFailedCapture]],
+        ? [["Keep incomplete", decide(captureCoordinator.keepIncomplete), "primary"], ["Discard", decide(captureCoordinator.discard)]]
+        : [["Retry", decide(captureCoordinator.retry), "primary"], ["Discard", decide(captureCoordinator.discard)]],
     });
   }
 
@@ -811,7 +669,6 @@
       "aria-label", debugMode ? "More options, Debug capture enabled" : "More options");
     panelEl.setAttribute("aria-busy", String(draftMutationBlocked));
     panelEl.querySelectorAll?.(".pi-step-filter").forEach((control) => { control.disabled = draftMutationBlocked; });
-    notesEl?.querySelectorAll?.("button, textarea").forEach((control) => { control.disabled = draftMutationBlocked; });
     const error = byId("pi-delivery-error");
     if (error) {
       error.textContent = deliveryError;
@@ -838,12 +695,9 @@
       recoveryRefresh.disabled = draftMutationBlocked;
     }
     const evidenceVisible = run.mode === "annotating";
-    if (connectorsEl) connectorsEl.style.display = evidenceVisible ? "" : "none";
-    if (markersEl) markersEl.style.display = evidenceVisible ? "" : "none";
-    if (notesEl) notesEl.style.display = evidenceVisible ? "" : "none";
     if (!evidenceVisible) hideHighlight();
-    renderFilmstrip();
-    renderEvidence();
+    renderFilmstrip(snapshot);
+    renderEvidence(snapshot);
   }
 
   function projectPanelPosition() {
@@ -863,14 +717,12 @@
   }
 
   function currentResult() {
-    draft.refreshLiveness();
     return draft.snapshot();
   }
 
-  function renderFilmstrip() {
+  function renderFilmstrip(result) {
     const filmstrip = byId("pi-filmstrip");
     if (!filmstrip) return;
-    const result = currentResult();
     const total = result.steps.reduce((count, step) => count + step.elements.length, 0);
     filmstrip.innerHTML = `<button class="pi-step-filter ${stepFilter === "all" ? "active" : ""}"
       id="pi-filter-all" data-step="all" aria-pressed="${stepFilter === "all"}"
@@ -896,297 +748,8 @@
     });
   }
 
-  function renderEvidence() {
-    if (!markersEl || !notesEl) return;
-    const result = currentResult();
-    const visible = [];
-    result.steps.forEach((step, stepIndex) => {
-      if (stepFilter !== "all" && stepFilter !== step.id) return;
-      step.elements.forEach((element, elementIndex) => visible.push({
-        step,
-        element,
-        markerNumber: `${stepIndex + 1}.${elementIndex + 1}`,
-      }));
-    });
-    markersEl.innerHTML = "";
-    for (const { element, markerNumber } of visible) {
-      const record = records.get(element.id);
-      const source = record?.sourceNode;
-      if (!source || source.isConnected === false) continue;
-      const rect = source.getBoundingClientRect();
-      if (element.id === activeRecordId) {
-        const outline = document.createElement("div");
-        outline.className = "pi-marker-outline pi-current-target-outline";
-        outline.dataset.annotationId = element.id;
-        outline.setAttribute("aria-label", "Current Element annotation target");
-        Object.assign(outline.style, {
-          left: `${rect.left}px`, top: `${rect.top}px`,
-          width: `${rect.width}px`, height: `${rect.height}px`,
-        });
-        markersEl.appendChild(outline);
-      }
-      const marker = document.createElement("button");
-      marker.className = "pi-marker-badge";
-      marker.dataset.annotationId = element.id;
-      marker.style.left = `${rect.right}px`;
-      marker.style.top = `${rect.top}px`;
-      marker.textContent = String(markerNumber);
-      marker.setAttribute("aria-label", `Open Element annotation ${markerNumber}`);
-      marker.addEventListener("click", (event) => {
-        event.preventDefault();
-        event.stopPropagation();
-        createNote(element.id);
-      });
-      markersEl.appendChild(marker);
-    }
-    for (const card of Array.from(notesEl.children)) {
-      const id = card.dataset?.annotationId;
-      if (!visible.some((item) => item.element.id === id) || records.get(id)?.noteOpen === false) {
-        card.remove();
-      }
-      else {
-        updateNoteCard(card, visible.find((item) => item.element.id === id).element);
-        const bounds = card.getBoundingClientRect();
-        placeNoteCard(card, { left: bounds.left, top: bounds.top });
-      }
-    }
-    for (const { element } of visible) {
-      if (records.get(element.id)?.noteOpen !== false &&
-          !notesEl.querySelector?.(`[data-annotation-id="${element.id}"]`)) {
-        createNote(element.id, { focus: false });
-      }
-    }
-    renderConnectors();
-  }
-
-  function renderConnectors() {
-    if (!connectorsEl || !markersEl || !notesEl) return;
-    connectorsEl.innerHTML = "";
-    for (const card of notesEl.querySelectorAll?.(".pi-note-card") || []) {
-      const id = card.dataset.annotationId;
-      const marker = markersEl.querySelector?.(`.pi-marker-badge[data-annotation-id="${id}"]`);
-      if (!marker || card.style.visibility === "hidden") continue;
-      const markerBounds = marker.getBoundingClientRect();
-      const cardBounds = card.getBoundingClientRect();
-      const startX = markerBounds.left + markerBounds.width / 2;
-      const startY = markerBounds.top + markerBounds.height / 2;
-      const endX = Math.max(cardBounds.left, Math.min(startX, cardBounds.right));
-      const endY = Math.max(cardBounds.top, Math.min(startY, cardBounds.bottom));
-      const bendX = startX + (endX - startX) / 2;
-      const path = document.createElementNS("http://www.w3.org/2000/svg", "path");
-      path.classList.add("pi-connector");
-      path.dataset.annotationId = id;
-      path.setAttribute("d", `M ${startX} ${startY} C ${bendX} ${startY}, ${bendX} ${endY}, ${endX} ${endY}`);
-      connectorsEl.appendChild(path);
-    }
-  }
-
-  function createNote(id, { focus = true } = {}) {
-    const result = currentResult();
-    const element = result.steps.flatMap((step) => step.elements).find((item) => item.id === id);
-    if (!element) return;
-    const record = records.get(id);
-    if (record) record.noteOpen = true;
-    let card = notesEl.querySelector?.(`[data-annotation-id="${id}"]`);
-    if (card) {
-      if (focus) activeRecordId = id;
-      updateNoteCard(card, element);
-      if (focus) renderEvidence();
-      if (focus) card.querySelector?.(".pi-note-textarea")?.focus();
-      return;
-    }
-    card = document.createElement("section");
-    card.className = "pi-note-card";
-    card.dataset.annotationId = id;
-    card.innerHTML = `
-      <div class="pi-note-header">
-        <span class="pi-historical" role="status"></span>
-        <button class="pi-note-expand" aria-label="Move Element annotation to parent">▲</button>
-        <button class="pi-note-contract" aria-label="Move Element annotation toward original element">▼</button>
-        <button class="pi-note-close" aria-label="Delete element annotation">×</button>
-      </div>
-      <div class="pi-note-body">
-        <span class="pi-note-selector">${inspect.escapeHtml(element.metadata.selector)}</span>
-        <div class="pi-note-comment-row">
-          <textarea class="pi-note-textarea" placeholder="Describe changes for this element...">${inspect.escapeHtml(element.comment)}</textarea>
-          <button class="pi-note-send" type="button" aria-label="Send comment">↑</button>
-        </div>
-      </div>`;
-    const source = record?.sourceNode;
-    const rect = source?.getBoundingClientRect?.() || { right: 24, top: 24 };
-    card.style.visibility = "hidden";
-    const commentField = card.querySelector?.(".pi-note-textarea");
-    commentField?.addEventListener("input", (event) => {
-      if (run.operation === "idle") draft.updateComment(id, event.target.value);
-    });
-    commentField?.addEventListener("keydown", (event) => {
-      if (event.key !== "Enter" || (!event.metaKey && !event.ctrlKey) ||
-          event.repeat || event.isComposing) return;
-      event.preventDefault();
-      event.stopPropagation();
-      void sendNote(id);
-    });
-    card.querySelector?.(".pi-note-close")?.addEventListener("click", () => deleteRecord(id));
-    card.querySelector?.(".pi-note-send")?.addEventListener("click", () => { void sendNote(id); });
-    card.querySelector?.(".pi-note-expand")?.addEventListener("click", () => moveElementTarget(id, "up"));
-    card.querySelector?.(".pi-note-contract")?.addEventListener("click", () => moveElementTarget(id, "down"));
-    card.querySelector?.(".pi-note-header")?.addEventListener("pointerdown", (event) => {
-      if (!event.isPrimary || event.button !== 0 || run.operation !== "idle" ||
-          run.modal !== "none" || event.target.closest?.("button")) return;
-      const bounds = card.getBoundingClientRect();
-      noteDrag = {
-        card,
-        id,
-        pointerId: event.pointerId,
-        startX: event.clientX,
-        startY: event.clientY,
-        startLeft: bounds.left,
-        startTop: bounds.top,
-      };
-      card.classList.add("dragging");
-      event.preventDefault();
-    });
-    card.addEventListener("focusin", () => {
-      if (activeRecordId === id) return;
-      activeRecordId = id;
-      renderEvidence();
-    });
-    notesEl.appendChild(card);
-    placeNoteCard(card, record?.notePosition || { left: rect.right + 16, top: rect.top });
-    card.style.visibility = "";
-    updateNoteCard(card, element);
-    if (focus) {
-      activeRecordId = id;
-      renderEvidence();
-    }
-    if (focus) card.querySelector?.(".pi-note-textarea")?.focus();
-  }
-
-  function placeNoteCard(card, preferred) {
-    const margin = 16;
-    card.style.maxHeight = "";
-    const bounds = card.getBoundingClientRect();
-    const maxLeft = Math.max(margin, window.innerWidth - bounds.width - margin);
-    const panelBounds = panelEl?.getBoundingClientRect?.();
-    const reservesBottom = run.mode === "annotating" && !minimized && panelBounds?.top > margin;
-    const availableBottom = reservesBottom ? panelBounds.top - 12 : window.innerHeight - margin;
-    const availableHeight = Math.max(96, availableBottom - margin);
-    card.style.maxHeight = `${availableHeight}px`;
-    const resizedBounds = card.getBoundingClientRect();
-    const maxTop = Math.max(margin, availableBottom - resizedBounds.height);
-    const left = Math.min(Math.max(margin, preferred.left), maxLeft);
-    const top = Math.min(Math.max(margin, preferred.top), maxTop);
-    card.style.left = `${left}px`;
-    card.style.top = `${top}px`;
-    return { left, top };
-  }
-
-  function updateHistorical(card, element) {
-    const status = card.querySelector?.(".pi-historical");
-    if (!status) return;
-    status.textContent = element.historical ? "Historical — source element no longer exists" : "";
-    status.hidden = !element.historical;
-  }
-
-  function updateNoteCard(card, element) {
-    updateHistorical(card, element);
-    const selector = card.querySelector?.(".pi-note-selector");
-    if (selector) {
-      selector.textContent = element.metadata.selector;
-      selector.title = element.metadata.selector;
-    }
-    updateNavigationControls(card, element.id);
-  }
-
-  function updateNavigationControls(card, id) {
-    const record = records.get(id);
-    const moveUp = card.querySelector?.(".pi-note-expand");
-    const moveDown = card.querySelector?.(".pi-note-contract");
-    if (!moveUp || !moveDown || !record) return;
-
-    const currentStep = draft.isCurrentStep(id);
-    const blocked = run.operation !== "idle" || run.modal !== "none";
-    const sourceAvailable = record.sourceNode?.isConnected !== false;
-    const parent = sourceAvailable ? record.sourceNode.parentElement : null;
-    const canMoveUp = parent && parent !== document.body && parent !== document.documentElement &&
-      !inspect.isPiElement(parent);
-    const retracedChild = record.navigation.index > 0
-      ? record.navigation.path[record.navigation.index - 1]
-      : null;
-    const onlyChild = record.navigation.index === 0
-      ? uniqueNavigableChild(record.sourceNode)
-      : null;
-    const canMoveDown = retracedChild?.isConnected !== false && Boolean(retracedChild) || Boolean(onlyChild);
-    const closedReason = "Element cannot be changed after its interaction step is closed";
-    const unavailableReason = "The current source element is no longer available";
-    const busyReason = "Wait for the current annotation operation to finish";
-
-    moveUp.disabled = blocked || !currentStep || !sourceAvailable || !canMoveUp;
-    moveDown.disabled = blocked || !currentStep || !sourceAvailable || !canMoveDown;
-    moveUp.title = blocked ? busyReason :
-      !currentStep ? closedReason :
-      !sourceAvailable ? unavailableReason :
-      !canMoveUp ? "No parent element is available" :
-      "Move Element annotation to parent";
-    moveDown.title = blocked ? busyReason :
-      !currentStep ? closedReason :
-      !sourceAvailable ? unavailableReason :
-      !canMoveDown ? "Already at the original element" :
-      "Move Element annotation toward original element";
-  }
-
-  function uniqueNavigableChild(source) {
-    if (!source?.children) return null;
-    const children = Array.from(source.children).filter((child) => !inspect.isPiElement(child));
-    return children.length === 1 ? children[0] : null;
-  }
-
-  function moveElementTarget(id, direction) {
-    if (run.operation !== "idle" || run.modal !== "none" || !draft.canRetarget(id)) return;
-    const record = records.get(id);
-    if (!record?.navigation || record.sourceNode?.isConnected === false) return;
-
-    let target;
-    let targetIndex;
-    let truncate = false;
-    if (direction === "up") {
-      target = record.sourceNode.parentElement;
-      if (!target || target === document.body || target === document.documentElement || inspect.isPiElement(target)) {
-        return;
-      }
-      targetIndex = record.navigation.index + 1;
-      truncate = true;
-    } else {
-      if (record.navigation.index === 0) {
-        target = uniqueNavigableChild(record.sourceNode);
-        if (!target || target.isConnected === false) return;
-        record.navigation.path.unshift(target);
-        targetIndex = 0;
-      } else {
-        targetIndex = record.navigation.index - 1;
-        target = record.navigation.path[targetIndex];
-        if (!target || target.isConnected === false) return;
-      }
-    }
-
-    const result = draft.retargetElement({
-      id,
-      sourceNode: target,
-      metadata: freezeMetadata(target),
-    });
-    if (result.status !== "retargeted") return;
-    record.sourceNode = target;
-    record.navigation.path[targetIndex] = target;
-    if (truncate) record.navigation.path.length = targetIndex + 1;
-    record.navigation.index = targetIndex;
-    deliveryConfirmedDegraded = false;
-    renderEvidence();
-  }
-
   function deleteRecord(id) {
     if (run.operation !== "idle" || run.modal !== "none" || !draft.softDelete(id)) return;
-    if (activeRecordId === id) activeRecordId = null;
-    notesEl.querySelector?.(`[data-annotation-id="${id}"]`)?.remove();
     byId("pi-undo") && (byId("pi-undo").disabled = false);
     if (!currentResult().steps.some((step) => step.id === stepFilter)) stepFilter = "all";
     deliveryConfirmedDegraded = false;
@@ -1195,22 +758,18 @@
 
   async function sendNote(id) {
     if (run.operation !== "idle" || run.modal !== "none") return;
-    const record = records.get(id);
-    if (!record?.sourceNode || record.sourceNode.isConnected === false) return;
-    record.noteOpen = false;
-    if (activeRecordId === id) activeRecordId = null;
-    notesEl.querySelector?.(`[data-annotation-id="${id}"]`)?.remove();
-    renderEvidence();
-    await captureElement(record.sourceNode, { retargetId: id });
+    const element = currentResult().steps.flatMap(step => step.elements).find(element => element.id === id);
+    if (!element?.sourceNode || element.sourceNode.isConnected === false) return;
+    evidenceView.collapse(id);
+    await captureCoordinator.send(id, element.sourceNode);
   }
 
   function undoDelete() {
     if (run.operation !== "idle" || run.modal !== "none") return;
     const restored = draft.undo();
     if (!restored) return;
-    records.get(restored.id) && (records.get(restored.id).stepId = restored.stepId);
     render();
-    createNote(restored.id);
+    evidenceView.open(restored.id);
   }
 
   function setFilter(value) {
@@ -1220,10 +779,10 @@
   }
 
   function focusRecord(id) {
-    const record = records.get(id);
-    if (record) stepFilter = record.stepId;
+    const step = currentResult().steps.find(step => step.elements.some(element => element.id === id));
+    if (step) stepFilter = step.id;
     render();
-    createNote(id);
+    evidenceView.open(id);
   }
 
   function onMouseMove(event) {
@@ -1293,7 +852,7 @@
   function hideChrome() {
     hideHighlight();
     etch.clearMarkers();
-    const elements = [panelEl, connectorsEl, markersEl, notesEl].filter(Boolean);
+    const elements = [panelEl, ...evidenceView.surfaces()].filter(Boolean);
     const display = elements.map((element) => [element, element.style.display]);
     elements.forEach((element) => { element.style.display = "none"; });
     return () => {
@@ -1306,7 +865,7 @@
 
   function playCaptureReturnAnimation() {
     cleanupCaptureReturnAnimation();
-    for (const surface of [panelEl, connectorsEl, markersEl, notesEl]) {
+    for (const surface of [panelEl, ...evidenceView.surfaces()]) {
       if (surface?.isConnected) surface.classList.add("pi-rematerializing");
     }
     captureReturnTimer = setTimeout(cleanupCaptureReturnAnimation, 800);
@@ -1315,7 +874,7 @@
   function cleanupCaptureReturnAnimation() {
     if (captureReturnTimer !== null) clearTimeout(captureReturnTimer);
     captureReturnTimer = null;
-    for (const surface of [panelEl, connectorsEl, markersEl, notesEl]) {
+    for (const surface of [panelEl, ...evidenceView.surfaces()]) {
       surface?.classList.remove("pi-rematerializing");
     }
   }
@@ -1355,18 +914,6 @@
   }
 
   function onDragMove(event) {
-    if (noteDrag) {
-      if (event.pointerId !== noteDrag.pointerId) return;
-      const position = placeNoteCard(noteDrag.card, {
-        left: noteDrag.startLeft + event.clientX - noteDrag.startX,
-        top: noteDrag.startTop + event.clientY - noteDrag.startY,
-      });
-      const record = records.get(noteDrag.id);
-      if (record) record.notePosition = position;
-      renderConnectors();
-      event.preventDefault();
-      return;
-    }
     if (!bubbleDrag || !panelEl || event.pointerId !== bubbleDrag.pointerId) return;
     const dx = event.clientX - bubbleDrag.x;
     const dy = event.clientY - bubbleDrag.y;
@@ -1385,11 +932,9 @@
   }
 
   function endDrag(event) {
-    const activeDrag = noteDrag || bubbleDrag;
+    const activeDrag = bubbleDrag;
     if (activeDrag && event.pointerId !== activeDrag.pointerId) return;
     bubbleDrag = null;
-    noteDrag?.card?.classList.remove("dragging");
-    noteDrag = null;
     if (event.type === "pointercancel") bubbleDragged = false;
   }
 
@@ -1404,8 +949,7 @@
   }
 
   function onPageMutations(mutations) {
-    const sources = Array.from(records.values()).flatMap((record) =>
-      [record.sourceNode, ...(record.navigation?.path || [])]).filter(Boolean);
+    const sources = evidenceView.sourceNodes();
     if (sources.length === 0 || livenessFrame !== null) return;
     const affectsSource = mutations.some((mutation) =>
       [...mutation.addedNodes, ...mutation.removedNodes].some((node) =>
@@ -1503,12 +1047,6 @@
     });
   }
 
-  function settleCaptureLifecycle() {
-    resolveCaptureLifecycle?.();
-    resolveCaptureLifecycle = null;
-    captureLifecyclePromise = null;
-  }
-
   const navigationAdapter = createNavigationAdapter({
     isDirty: () => draft.hasRecoverableWork() || etch.hasChanges?.() === true,
     retainCanceledRoute: (descriptor) => routeGuard.retainCanceledRoute(descriptor),
@@ -1518,13 +1056,12 @@
     isDirty: () => draft.hasRecoverableWork() || etch.hasChanges?.() === true,
     getOperation: () => run.operation,
     settleOperation: async () => {
-      if (captureLifecyclePromise) await captureLifecyclePromise;
-      else if (capturePromise) await capturePromise;
+      await captureCoordinator.settled();
       if (transitionPromise) await transitionPromise;
     },
     discardDraft: async () => {
       draft.purge();
-      records.clear();
+      evidenceView.reset();
       etch.reset();
       closeModal();
       render();
