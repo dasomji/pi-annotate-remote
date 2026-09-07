@@ -627,48 +627,8 @@
   }
 
   /**
-   * Compile everything recorded since start() into an editCapture payload.
-   * Returns null when recording never started or compilation fails. Recording
-   * state is kept so a failed delivery can collect again on retry.
-   */
-  async function collect() {
-    if (etchStartTime === null) return null;
-
-    // Disconnect observer first — must happen regardless of errors below
-    stop();
-
-    try {
-      const { inlineStyles, rules, dom, changeCount, warnings } = compileChanges();
-
-      let beforeScreenshot = null;
-      let afterScreenshot = null;
-
-      if (changeCount > 0) {
-        // The caller has already hidden the annotation UI for capture
-        const shots = await captureBeforeAfterScreenshots();
-        beforeScreenshot = shots.beforeScreenshot;
-        afterScreenshot = shots.afterScreenshot;
-      }
-
-      return {
-        inlineStyles,
-        rules,
-        dom,
-        beforeScreenshot,
-        afterScreenshot,
-        duration: Date.now() - etchStartTime,
-        changeCount,
-        warnings,
-      };
-    } catch (err) {
-      console.error("[pi-annotate] Edit capture failed:", err);
-      return null;
-    }
-  }
-
-  /**
    * End one Annotation-mode recording period. Empty periods are omitted.
-   * Unlike collect(), finalization consumes all period state. Capture failures
+   * Finalization consumes all period state. Capture failures
    * reject so the caller can retain a submission warning without blocking a
    * transition into Interaction mode.
    */
@@ -698,5 +658,5 @@
     }
   }
 
-  modules.etch = { start, stop, reset, clearMarkers, collect, hasChanges, finalize };
+  modules.etch = { start, stop, reset, clearMarkers, hasChanges, finalize };
 })();

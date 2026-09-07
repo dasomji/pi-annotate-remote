@@ -164,163 +164,35 @@
       }
     }
 
-    function createCaptureTransaction({
-      id, retargetId, stepId, attempt, sourceNode, metadata, cropRect, url, viewport, createsStep,
-    }) {
-      const transaction = Object.freeze({
-        draftToken: token,
-        id,
-        ...(retargetId ? { retargetId } : {}),
-        stepId,
-        attempt,
-        sourceNode,
-        metadata: deepFreeze(clone(metadata)),
-        cropRect: deepFreeze(clone(cropRect)),
-        url,
-        viewport: deepFreeze(clone(viewport)),
-        createsStep,
-      });
-      capture = { state: "capturing", sourceNode, transaction };
-      return transaction;
-    }
-
-    function beginCapture({ sourceNode, metadata, cropRect = metadata?.rect, url, viewport }) {
-      if (!sourceNode || !metadata || typeof url !== "string" || !viewport) {
-        throw new TypeError("Capture requires a source node, metadata, URL, and viewport");
-      }
-
-      if (capture?.state === "capturing") {
-        return { status: "busy" };
-      }
-
-      if (capture?.state === "failed") {
-        if (capture.sourceNode !== sourceNode) return { status: "busy" };
-        if (capture.transaction.attempt >= 3) {
-          return { status: "attempts-exhausted", transaction: capture.transaction };
-        }
-        if (sourceNode.isConnected === false) {
-          return { status: "source-disconnected", transaction: capture.transaction };
-        }
-
-        return createCaptureTransaction({
-          id: capture.transaction.id,
-          stepId: capture.transaction.stepId,
-          attempt: capture.transaction.attempt + 1,
-          sourceNode,
-          metadata,
-          cropRect,
-          url,
-          viewport,
-          createsStep: capture.transaction.createsStep,
-        });
-      }
-
-      if (!stepBoundaryArmed && activeStep) {
-        const existing = activeStep.elements.find(
-          (element) => element.sourceNode === sourceNode,
-        );
-        if (existing) {
-          const restored = existing.deleted;
-          if (restored) {
-            existing.deleted = false;
-            undoStack = undoStack.filter((id) => id !== existing.id);
-          }
-          return { status: "focused", id: existing.id, restored };
-        }
-      }
-
-      const createsStep = stepBoundaryArmed || !activeStep;
-      const stepId = createsStep ? createId() : activeStep.id;
-      return createCaptureTransaction({
-        id: createId(),
-        stepId,
-        attempt: 1,
-        sourceNode,
-        metadata,
-        cropRect,
-        url,
-        viewport,
-        createsStep,
-      });
-    }
-
-    function beginRetarget({ id, sourceNode, metadata, cropRect = metadata?.rect, url, viewport }) {
-      if (typeof id !== "string" || !sourceNode || !metadata || typeof url !== "string" || !viewport) {
-        throw new TypeError("Retarget capture requires an annotation ID, source node, metadata, URL, and viewport");
-      }
-
-      if (capture?.state === "capturing") return { status: "busy" };
-
-      if (capture?.state === "failed") {
-        if (capture.transaction.retargetId !== id || capture.sourceNode !== sourceNode) {
-          return { status: "busy" };
-        }
-        if (capture.transaction.attempt >= 3) {
-          return { status: "attempts-exhausted", transaction: capture.transaction };
-        }
-        if (sourceNode.isConnected === false) {
-          return { status: "source-disconnected", transaction: capture.transaction };
-        }
-        return createCaptureTransaction({
-          id,
-          retargetId: id,
-          stepId: capture.transaction.stepId,
-          attempt: capture.transaction.attempt + 1,
-          sourceNode,
-          metadata,
-          cropRect,
-          url,
-          viewport,
-          createsStep: false,
-        });
-      }
-
-      const found = locateElement(id);
-      if (!found || found.element.deleted || stepBoundaryArmed || found.step !== activeStep) {
-        return { status: "step-closed" };
-      }
-      const duplicate = found.step.elements.find(
-        (element) => !element.deleted && element.id !== id && element.sourceNode === sourceNode,
-      );
-      if (duplicate) return { status: "target-already-annotated", id: duplicate.id };
-
-      return createCaptureTransaction({
-        id,
-        retargetId: id,
-        stepId: found.step.id,
-        attempt: 1,
-        sourceNode,
-        metadata,
-        cropRect,
-        url,
-        viewport,
-        createsStep: false,
-      });
-    }
-
     function beginElementCapture({ id, sourceNode, cropRect, url, viewport }) {
       if (typeof id !== "string" || !sourceNode || !cropRect || typeof url !== "string" || !viewport) {
         throw new TypeError("Element capture requires an annotation ID, source node, crop rectangle, URL, and viewport");
       }
       const found = locateElement(id);
       if (!found || found.element.deleted) return { status: "step-closed" };
-      const metadata = found.element.metadata;
       if (capture?.state === "capturing") return { status: "busy" };
-      if (capture?.state === "failed") {
-        return beginRetarget({ id, sourceNode, metadata, cropRect, url, viewport });
+      if (capture) {
+        if (capture.transaction.id !== id || capture.sourceNode !== sourceNode) return { status: "busy" };
+        if (capture.transaction.attempt >= 3) {
+          return { status: "attempts-exhausted", transaction: capture.transaction };
+        }
+        if (sourceNode.isConnected === false) {
+          return { status: "source-disconnected", transaction: capture.transaction };
+        }
       }
-      return createCaptureTransaction({
+      const transaction = Object.freeze({
+        draftToken: token,
         id,
-        retargetId: id,
         stepId: found.step.id,
-        attempt: 1,
+        attempt: capture ? capture.transaction.attempt + 1 : 1,
         sourceNode,
-        metadata,
-        cropRect,
+        metadata: deepFreeze(clone(found.element.metadata)),
+        cropRect: deepFreeze(clone(cropRect)),
         url,
-        viewport,
-        createsStep: false,
+        viewport: deepFreeze(clone(viewport)),
       });
+      capture = { state: "capturing", sourceNode, transaction };
+      return transaction;
     }
 
     function commit(transaction, { viewportImage, cropImage }, incomplete) {
@@ -351,62 +223,21 @@
         throw new TypeError("Incomplete commits must identify missing evidence");
       }
 
-      if (transaction.retargetId) {
-        const found = locateElement(transaction.retargetId);
-        if (!found || found.element.deleted || found.step.id !== transaction.stepId) {
-          throw new Error("Element capture target is no longer available");
-        }
-        found.element.sourceNode = transaction.sourceNode;
-        found.element.historical = transaction.sourceNode.isConnected === false;
-        // Metadata is frozen when the target is accepted (initial click or an
-        // explicit retarget). Send-time capture contributes images only.
-        found.element.metadata = clone(transaction.metadata);
-        found.element.cropImage = clone(cropImage);
-        found.element.capturePending = false;
-        if (!isImageResult(found.step.viewportImage)) {
-          found.step.url = transaction.url;
-          found.step.viewport = clone(transaction.viewport);
-          found.step.viewportImage = clone(viewportImage);
-        }
-        capture = null;
-        return {
-          status: "committed",
-          stepId: found.step.id,
-          id: found.element.id,
-          incomplete,
-          retargeted: true,
-        };
+      const found = locateElement(transaction.id);
+      if (!found || found.element.deleted || found.step.id !== transaction.stepId) {
+        throw new Error("Element capture target is no longer available");
       }
-
-      let step = activeStep;
-      if (transaction.createsStep) {
-        step = {
-          id: transaction.stepId,
-          url: transaction.url,
-          viewport: clone(transaction.viewport),
-          viewportImage: clone(viewportImage),
-          elements: [],
-        };
-        steps.push(step);
-        activeStep = step;
-        stepBoundaryArmed = false;
-      } else if (!step || step.id !== transaction.stepId) {
-        throw new Error("Capture transaction targets an unavailable step");
+      found.element.historical = transaction.sourceNode.isConnected === false;
+      found.element.cropImage = clone(cropImage);
+      found.element.capturePending = false;
+      // The first sent element supplies this step's representative viewport.
+      if (!isImageResult(found.step.viewportImage)) {
+        found.step.url = transaction.url;
+        found.step.viewport = clone(transaction.viewport);
+        found.step.viewportImage = clone(viewportImage);
       }
-
-      const element = {
-        id: transaction.id,
-        sourceNode: transaction.sourceNode,
-        historical: transaction.sourceNode.isConnected === false,
-        comment: "",
-        metadata: clone(transaction.metadata),
-        cropImage: clone(cropImage),
-        capturePending: false,
-        deleted: false,
-      };
-      step.elements.push(element);
       capture = null;
-      return { status: "committed", stepId: step.id, id: element.id, incomplete };
+      return { status: "committed", stepId: found.step.id, id: found.element.id, incomplete };
     }
 
     function commitCapture(transaction, images) {
@@ -438,22 +269,6 @@
 
     function canRetarget(id) {
       return !capture && isCurrentStep(id);
-    }
-
-    function findBySource(sourceNode) {
-      for (const step of steps) {
-        const element = step.elements.find(
-          (candidate) => candidate.sourceNode === sourceNode,
-        );
-        if (element) {
-          return {
-            stepId: step.id,
-            element: publicElement(element),
-            deleted: element.deleted,
-          };
-        }
-      }
-      return null;
     }
 
     function updateComment(id, text) {
@@ -574,6 +389,7 @@
         hasMissingEvidence: hasMissingEvidence(),
         hasPendingEvidence: hasPendingEvidence(),
         stepBoundaryArmed,
+        currentStepId: activeStep?.id || null,
         capture: capture ? {
           state: capture.state,
           id: capture.transaction.id,
@@ -617,8 +433,6 @@
 
     return {
       armStepBoundary,
-      beginCapture,
-      beginRetarget,
       beginElementCapture,
       stageElement,
       retargetElement,
@@ -627,7 +441,6 @@
       commitCapture,
       commitIncomplete,
       discardCapture,
-      findBySource,
       updateComment,
       softDelete,
       undo,

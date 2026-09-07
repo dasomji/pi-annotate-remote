@@ -161,7 +161,7 @@ export interface AnnotationResultV1 {
   editCapture?: EditCapture;
 }
 
-/** Element metadata frozen at the instant a v2 capture attempt begins */
+/** Element metadata frozen when a click or explicit retarget is accepted */
 export interface FrozenElementMetadata
   extends Omit<ElementSelection, "comment" | "boxModel" | "accessibility" | "keyStyles"> {
   boxModel: BoxModel;

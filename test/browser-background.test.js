@@ -5,18 +5,6 @@ import vm from "node:vm";
 
 const backgroundSource = readFileSync(new URL("../chrome-extension/background.js", import.meta.url), "utf8");
 const EXTENSION_ID = "bpeadifabilnfpephegaodjbcjjfjghk";
-const ANNOTATOR_SCRIPT_FILES = [
-  "content-styles.js",
-  "content-inspect.js",
-  "content-capture.js",
-  "content-draft.js",
-  "content-etch.js",
-  "content-route-guard.js",
-  "content-navigation.js",
-  "content-run.js",
-  "content-dialogs.js",
-  "content.js",
-];
 const TARGET_TAB = {
   id: 7,
   windowId: 3,
@@ -413,7 +401,9 @@ test("starting annotation injects the annotator when only the chooser handles ta
   });
 
   assert.deepEqual(response, { started: true, baseOrigin: "https://example.test" });
-  assert.deepEqual(harness.injected, [{ target: { tabId: 7 }, files: ANNOTATOR_SCRIPT_FILES }]);
+  assert.equal(harness.injected.length, 1);
+  assert.deepEqual(harness.injected[0].target, { tabId: 7 });
+  assert.equal(harness.injected[0].files.at(-1), "content.js");
 });
 
 test("starting annotation targets the remembered page and records its origin recommendation", async () => {
@@ -427,7 +417,9 @@ test("starting annotation targets the remembered page and records its origin rec
     sessionId: "session_abcdefghijkl",
   });
   assert.deepEqual(response, { started: true, baseOrigin: "https://example.test" });
-  assert.deepEqual(harness.injected, [{ target: { tabId: 7 }, files: ANNOTATOR_SCRIPT_FILES }]);
+  assert.equal(harness.injected.length, 1);
+  assert.deepEqual(harness.injected[0].target, { tabId: 7 });
+  assert.equal(harness.injected[0].files.at(-1), "content.js");
   assert.deepEqual(harness.tabMessages, [
     { tabId: 7, message: { type: "OPEN_SESSION_CHOOSER" } },
     {

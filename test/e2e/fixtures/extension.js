@@ -5,6 +5,8 @@ import { tmpdir } from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 
+import { isAnnotationResult } from "../../../annotation/validate.ts";
+
 const REPO_ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../../..");
 const EXTENSION_SOURCE = path.join(REPO_ROOT, "chrome-extension");
 const SESSION_ID = "e2e-session-0001";
@@ -93,6 +95,8 @@ async function startFixtureServer() {
     failDeliveries: 0,
     deliveryDelayMs: 0,
     destinationRequests: [],
+    sessions: [{ id: SESSION_ID, label: "E2E session" }],
+    annotationSessionIds: [],
   };
 
   const server = createServer(async (request, response) => {
@@ -127,13 +131,13 @@ async function startFixtureServer() {
     }
 
     if (request.method === "GET" && url.pathname === "/v1/sessions") {
-      sendJson(response, 200, { sessions: [{ id: SESSION_ID, label: "E2E session" }] });
+      sendJson(response, 200, { sessions: state.sessions });
       return;
     }
 
     if (
       request.method === "POST" &&
-      url.pathname === `/v1/sessions/${SESSION_ID}/annotations`
+      /^\/v1\/sessions\/[^/]+\/annotations$/.test(url.pathname)
     ) {
       state.annotationAttempts += 1;
       let annotation;
@@ -143,6 +147,15 @@ async function startFixtureServer() {
         sendJson(response, 400, { error: { message: "Fixture received invalid JSON" } });
         return;
       }
+      if (request.headers.authorization !== `Bearer ${BROKER_TOKEN}`) {
+        sendJson(response, 401, { error: { message: "Unauthorized" } });
+        return;
+      }
+      if (!isAnnotationResult(annotation)) {
+        sendJson(response, 400, { error: { message: "Receiver rejected the annotation payload" } });
+        return;
+      }
+      state.annotationSessionIds.push(url.pathname.split("/")[3]);
       state.annotations.push(annotation);
       if (state.deliveryDelayMs > 0) {
         await new Promise((resolve) => setTimeout(resolve, state.deliveryDelayMs));
@@ -179,14 +192,14 @@ async function startFixtureServer() {
   };
 }
 
-async function makeTestExtension() {
+async function makeTestExtension(productionManifest) {
   const root = await mkdtemp(path.join(tmpdir(), "pi-annotate-e2e-"));
   const extensionPath = path.join(root, "extension");
   await cp(EXTENSION_SOURCE, extensionPath, { recursive: true });
 
   const manifestPath = path.join(extensionPath, "manifest.json");
   const manifest = JSON.parse(await readFile(manifestPath, "utf8"));
-  manifest.host_permissions = [
+  if (!productionManifest) manifest.host_permissions = [
     ...new Set([...(manifest.host_permissions || []), "<all_urls>"]),
   ];
   await writeFile(manifestPath, `${JSON.stringify(manifest, null, 2)}\n`);
@@ -194,8 +207,9 @@ async function makeTestExtension() {
 }
 
 export const test = base.extend({
-  context: async ({ headless }, use) => {
-    const extension = await makeTestExtension();
+  productionManifest: [false, { option: true }],
+  context: async ({ headless, productionManifest }, use) => {
+    const extension = await makeTestExtension(productionManifest);
     const userDataDir = path.join(extension.root, "profile");
     const context = await chromium.launchPersistentContext(userDataDir, {
       channel: "chromium",

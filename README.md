@@ -230,8 +230,14 @@ There is no Native Messaging host and no build step.
 npm ci
 npm test
 npm run check
+npm run install:e2e
+npm run test:e2e
 npm pack --dry-run
 ```
+
+`check` checks every JavaScript/TypeScript file for syntax, type-checks the Pi integration and annotation processing modules, and checks version consistency. `typecheck` runs the TypeScript check alone.
+
+Draft tests exercise selection followed by Send, and validate delivered payloads with the receiving validator. Chromium tests cover DOM behavior; one delivery test also uses the real broker and Pi session client. The production-manifest permission test covers waiting for native approval; accepted and denied permission responses are covered by the settings and pairing unit tests.
 
 Reload the unpacked extension at `chrome://extensions` after changing browser files. Restart or reload Pi after changing `index.ts`.
 

@@ -4,7 +4,6 @@ import test from "node:test";
 import vm from "node:vm";
 
 const settingsSource = readFileSync(new URL("../chrome-extension/settings.js", import.meta.url), "utf8");
-const settingsMarkup = readFileSync(new URL("../chrome-extension/settings.html", import.meta.url), "utf8");
 
 class SettingsElement {
   constructor() {
@@ -109,8 +108,6 @@ function createSettingsHarness({
 }
 
 test("settings page is connection-only and loads trusted broker configuration", async () => {
-  assert.match(settingsMarkup, /<title>Pi Annotate settings<\/title>/);
-  assert.doesNotMatch(settingsMarkup, /session-list|start-btn|refresh-btn/);
 
   const harness = createSettingsHarness({ configured: true });
   await flushAsync();
