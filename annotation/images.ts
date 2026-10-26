@@ -7,6 +7,6 @@ export type ImageWriter = (filename: string, bytes: Uint8Array) => Promise<strin
 
 export async function writeTemporaryImage(filename: string, bytes: Uint8Array): Promise<string> {
   const imagePath = join(tmpdir(), filename);
-  await writeFile(imagePath, bytes);
+  await writeFile(imagePath, bytes, { mode: 0o600, flag: "wx" });
   return imagePath;
 }
